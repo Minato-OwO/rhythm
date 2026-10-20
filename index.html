@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090e19" />
+    <title>FOUR FLOW — 4KEY / VR rhythm</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+    <script type="module" src="./src/main.js"></script>
+  </head>
+  <body>
+    <a-scene
+      id="scene"
+      embedded
+      background="color: #090e19"
+      fog="type: exponential; color: #090e19; density: 0.035"
+      renderer="antialias: true; colorManagement: true; highRefreshRate: true; maxCanvasWidth: -1; maxCanvasHeight: -1"
+      webxr="referenceSpaceType: local-floor; requiredFeatures: local-floor"
+      xr-mode-ui="enabled: false"
+      loading-screen="enabled: false"
+      keyboard-shortcuts="enterVR: false"
+    >
+      <a-entity id="playfield"></a-entity>
+      <a-entity id="rig">
+        <a-entity id="camera-mount" position="0 0 0">
+          <a-entity
+            id="camera"
+            camera="fov: 90; near: 0.05; far: 100"
+            look-controls="enabled: true; mouseEnabled: true; touchEnabled: true; magicWindowTrackingEnabled: false"
+            wasd-controls="enabled: false"
+          ></a-entity>
+        </a-entity>
+        <a-entity id="left-hand" tracked-controls="hand: left; space: gripSpace">
+          <a-cylinder radius="0.018" height="0.19" rotation="90 0 0" position="0 0 -0.03" material="shader: flat; color: #43ddff"></a-cylinder>
+          <a-sphere radius="0.035" position="0 0 -0.14" material="shader: flat; color: #b7f5ff"></a-sphere>
+        </a-entity>
+        <a-entity id="right-hand" tracked-controls="hand: right; space: gripSpace">
+          <a-cylinder radius="0.018" height="0.19" rotation="90 0 0" position="0 0 -0.03" material="shader: flat; color: #ff9478"></a-cylinder>
+          <a-sphere radius="0.035" position="0 0 -0.14" material="shader: flat; color: #ffe0d6"></a-sphere>
+        </a-entity>
+      </a-entity>
+    </a-scene>
+    <p id="fallback" role="alert" hidden></p>
+    <noscript>プレイするにはJavaScriptを有効にしてください。</noscript>
+  </body>
+</html>

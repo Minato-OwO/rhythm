@@ -1,0 +1,18 @@
+{
+  "title": "My First Chart",
+  "bpm": 120,
+  "offsetSeconds": 0,
+  "durationSeconds": 6,
+  "notes": [
+    { "beat": 0, "lane": 0 },
+    { "beat": 1, "lane": 1 },
+    { "beat": 2, "lane": 2 },
+    { "beat": 3, "lane": 3 },
+    { "beat": 4, "lane": 0 },
+    { "beat": 4, "lane": 3 },
+    { "beat": 5, "lane": 1 },
+    { "beat": 6, "lane": 2 },
+    { "beat": 7, "lane": 1 },
+    { "beat": 7, "lane": 2 }
+  ]
+}

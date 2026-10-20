@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FOUR FLOW Preview</title>
+  <style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#090e19}a-scene{width:100%;height:100%}#error{position:absolute;inset:20px;color:#ff9baa;font:14px sans-serif;pointer-events:none}</style>
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+</head>
+<body>
+  <a-scene id="scene" embedded background="color: #090e19" fog="type: exponential; color: #090e19; density: 0.035" renderer="antialias: true; colorManagement: true; highRefreshRate: true; maxCanvasWidth: -1; maxCanvasHeight: -1" xr-mode-ui="enabled: false" loading-screen="enabled: false" keyboard-shortcuts="enterVR: false">
+    <a-entity id="playfield"></a-entity>
+    <a-entity id="rig"><a-entity id="camera-mount"><a-entity id="camera" camera="fov: 90; near: 0.05; far: 100" look-controls="enabled: true; magicWindowTrackingEnabled: false" wasd-controls="enabled: false"></a-entity></a-entity></a-entity>
+  </a-scene>
+  <p id="error"></p>
+  <script type="module" src="./src/preview.js"></script>
+</body>
+</html>

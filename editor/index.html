@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FOUR FLOW Editor</title>
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+<div id="editor-layout">
+  <header id="top-bar">
+    <div class="logo">FOUR FLOW <span>EDITOR</span></div>
+    <div class="toolbar">
+      <div class="toolbar-group">
+        <button id="btn-new">新規</button>
+        <button id="btn-load-folder">曲フォルダを開く</button>
+        <button id="btn-osu-import">OSZ / OSU読込</button>
+        <button id="btn-audio">音声を選ぶ</button>
+        <button id="btn-model">GLBを追加</button>
+        <select id="server-song" class="ui-select" aria-label="ゲームの曲"><option value="">ゲームの曲</option></select>
+        <button id="btn-server-open">開く</button>
+        <button id="btn-refresh" title="ゲームの曲一覧を更新">更新</button>
+      </div>
+      <div class="toolbar-group">
+        <select id="note-lane" class="ui-select" aria-label="追加するレーン">
+          <option value="0">0 / D</option><option value="1">1 / F</option><option value="2">2 / J</option><option value="3">3 / K</option>
+        </select>
+        <button id="btn-add-note">＋ノーツ</button>
+        <select id="note-kind" class="ui-select" aria-label="ノーツの種類"><option value="tap">タップ</option><option value="hold">LN</option></select>
+        <button id="btn-add-sv">＋全体SV</button>
+        <select id="effect-type" class="ui-select" aria-label="追加する演出">
+          <option value="backgroundStage">標準ステージ</option>
+          <option value="lanePulse">レーン発光</option><option value="laneColor">レーン色変更</option><option value="screenFlash">画面フラッシュ</option><option value="screenFade">画面フェード</option>
+          <option value="backgroundColor">背景色変更</option><option value="backgroundPulse">背景パルス</option><option value="backgroundStars">星</option><option value="backgroundGLB">背景GLB</option>
+          <option value="backgroundScene">背景シーン(JS)</option>
+        </select>
+        <button id="btn-add-effect">＋演出</button>
+      </div>
+      <div class="toolbar-group">
+        <button id="btn-play" class="primary-btn">再生</button>
+        <button id="btn-stop">停止</button>
+        <span id="time-display" class="time-display">00:00.000</span>
+        <span id="beat-display">0.000拍</span>
+        <label>位置 <input id="seek-time" type="number" min="0" step="0.001" value="0" aria-label="再生位置（秒）" /> 秒</label>
+      </div>
+      <div class="toolbar-group">
+        <label for="snap-mode" title="拍のライン：1/1＝白、1/2＝赤、1/3＝紫、1/4＝青、1/8＝黄">スナップ</label>
+        <select id="snap-mode" class="ui-select"><option value="beat">拍</option><option value="ms">ms</option></select>
+        <select id="snap-beat-div" class="ui-select" aria-label="拍の間隔">
+          <option value="4">4拍（白）</option><option value="1">1拍（白）</option><option value="0.5">1/2拍（赤）</option><option value="0.3333333333333333">1/3拍（紫）</option><option value="0.25" selected>1/4拍（青）</option><option value="0.125">1/8拍（黄）</option>
+        </select>
+        <input id="snap-ms-val" type="number" min="1" step="1" value="100" aria-label="スナップ間隔（ms）" hidden />
+        <label><input id="metronome-toggle" type="checkbox" /> メトロノーム</label>
+        <input id="metronome-vol" type="range" min="0" max="1" step="0.05" value="0.5" aria-label="メトロノーム音量" />
+      </div>
+      <div class="toolbar-group">
+        <button id="btn-undo" title="Ctrl+Z">戻す</button><button id="btn-redo" title="Ctrl+Y">やり直す</button>
+        <button id="btn-save" class="primary-btn">フォルダへ保存</button>
+        <button id="btn-export">JSON保存</button>
+      </div>
+    </div>
+  </header>
+  <div id="main-content">
+    <aside id="outliner">
+      <div class="panel-header">曲情報 <span id="dirty-indicator"></span></div>
+      <div id="song-properties"></div>
+      <div class="panel-header">演出一覧 <span id="event-count"></span></div>
+      <ul id="event-list"></ul>
+    </aside>
+    <div id="viewport-container">
+      <iframe id="preview-frame" title="ゲームと共通の3Dプレビュー" allow="autoplay"></iframe>
+      <div class="viewport-hint">背景をドラッグして見回す / プレビューは自動演奏</div>
+      <div id="drop-zone" class="drop-zone">
+        <div class="drop-zone-content">
+          <h2>FOUR FLOW Editor</h2>
+          <p>曲フォルダをドロップ</p>
+          <p class="drop-hint">chart.jsonの曲フォルダ・OSZ・OSUに対応</p>
+          <p class="drop-hint">上の「曲フォルダを開く」「新規」からも始められます</p>
+        </div>
+      </div>
+    </div>
+    <aside id="properties"><div class="panel-header">選択項目</div><div id="properties-content"></div></aside>
+  </div>
+  <div id="timeline-resizer"></div>
+  <div id="timeline-panel">
+    <div class="panel-header timeline-header">
+      <span>タイムライン</span>
+      <span class="timeline-hint">ダブルクリックで追加 / ドラッグで移動 / 端で長さ変更 / Shiftでスナップ解除</span>
+      <div class="zoom-controls"><button id="btn-zoom-out">−</button><button id="btn-zoom-in">＋</button><span id="bpm-display"></span><span id="offset-display"></span><span id="sv-display" title="再生位置の従来SV倍率とspeed倍率">SV ×1 / SPEED ×1</span></div>
+    </div>
+    <div class="timeline-container" id="timeline-container">
+      <div class="timeline-layers" id="timeline-layers"></div>
+      <div class="timeline-tracks-container" id="timeline-tracks-container">
+        <div class="timeline-ruler" id="timeline-ruler"><div id="timeline-ruler-content"></div></div>
+        <div class="timeline-tracks" id="timeline-tracks"></div>
+        <div class="timeline-playhead" id="timeline-playhead"></div>
+      </div>
+    </div>
+  </div>
+  <footer id="editor-status" role="status" aria-live="polite">曲フォルダを開くか、新規作成してください。</footer>
+</div>
+<input id="file-folder-input" type="file" webkitdirectory multiple hidden />
+<input id="audio-input" type="file" accept=".ogg,.mp3,.wav,.m4a,.flac,audio/*" hidden />
+<input id="model-input" type="file" accept=".glb,model/gltf-binary" multiple hidden />
+<input id="osu-input" type="file" accept=".osz,.osu,.mp3,.ogg,.wav,.m4a,.flac,.aac,.opus" multiple hidden />
+<dialog id="osu-difficulty-dialog">
+  <form method="dialog">
+    <h2>読み込む4K譜面を選択</h2>
+    <label>難易度 <select id="osu-difficulty" aria-label="読み込む難易度"></select></label>
+    <div class="property-actions"><button value="cancel">閉じる</button><button value="open" class="primary-btn">開く</button></div>
+  </form>
+</dialog>
+<div id="context-menu" class="context-menu" hidden>
+  <button id="menu-dup-event" class="context-menu-item">複製</button>
+  <button id="menu-del-event" class="context-menu-item danger">削除</button>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "four-flow-vr",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "type": "module",
+  "description": "A-Frame four-lane rhythm game foundation with keyboard and VR swing inputs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "convert:osz": "node scripts/convert-osz.mjs",
+    "test:preview": "node --test tests/preview-clock.test.mjs"
+  }
+}
