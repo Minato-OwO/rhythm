@@ -99,7 +99,7 @@ test('KB・VRのヒットとLN始点で鳴り、空打ち・MISS・LN終点で�
     { id: 2, time: 3, lane: 2, endTime: null },
     { id: 3, time: 4, lane: 3, endTime: 6 },
   ] };
-  const game = new RhythmGame(chart, audio, { ...DEFAULT_SETTINGS });
+  const game = new RhythmGame(chart, audio, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   const detach = audio.attachHitSounds(game);
   game.hit(0, 1, 'keyboard');
@@ -213,7 +213,7 @@ test('KB・VRの保持を離すと猶予中でも止まり、再保持・ポー�
   const game = new RhythmGame({ duration: 8, notes: [
     { id: 0, time: 1, lane: 0, endTime: 5 },
     { id: 1, time: 1, lane: 1, endTime: 6 },
-  ] }, audio, { ...DEFAULT_SETTINGS });
+  ] }, audio, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   const detach = audio.attachHitSounds(game);
   game.setHeld(0, true, 'keyboard', 1); game.hit(0, 1);
@@ -268,7 +268,7 @@ test('通常SEとLNは同じ音量設定を通り、LNだけに測定済みのdB
 
 test('SE音量を保存・復元でき、追加後のプレイ設定の行が互いに重ならない', () => {
   const definition = PLAY_SETTING_DEFINITIONS.find(item => item.key === 'hitVolume');
-  assert.equal(DEFAULT_SETTINGS.hitVolume, 60);
+  assert.equal(DEFAULT_SETTINGS.hitVolume, 67);
   const restored = JSON.parse(JSON.stringify({ ...DEFAULT_SETTINGS, hitVolume: 32 }));
   assert.equal(clampSetting(definition, restored.hitVolume), 32);
   assert.equal(clampSetting(definition, -100), 0);

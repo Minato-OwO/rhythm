@@ -770,7 +770,8 @@ export class SpatialUI {
       this.button(panel, 'reset-target', all ? '全体の調整をリセット' : 'このパネルをリセット', 70, 782, 465, 63, () => this.actions.resetPanelLayout(this.panelTarget));
       this.button(panel, 'reset-all', 'すべてリセット', 565, 782, 465, 63, () => this.actions.resetPanelLayout());
     }
-    this.button(panel, 'close', '戻る', 70, 875, 960, 63, () => this.closeSettings(), { primary: true });
+    this.button(panel, 'export-settings', '全設定をエクスポート', 70, 875, 465, 63, this.actions.exportSettings);
+    this.button(panel, 'close', '戻る', 565, 875, 465, 63, () => this.closeSettings(), { primary: true });
     panel.texture.needsUpdate = true;
   }
 

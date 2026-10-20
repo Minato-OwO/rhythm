@@ -8,7 +8,7 @@ import { SpatialUI } from '../src/spatial-ui.js';
 function gameFixture(count = 1, overrides = {}) {
   const notes = Array.from({ length: count }, (_, index) => ({ id: index, time: index + 1, lane: index % 4, endTime: null }));
   const audio = { now: 0, update() {}, stop() {} };
-  const game = new RhythmGame({ notes, bpm: 120, duration: 10 }, audio, { ...DEFAULT_SETTINGS, ...overrides });
+  const game = new RhythmGame({ notes, bpm: 120, duration: 10 }, audio, { ...DEFAULT_SETTINGS, autoplay: 0, ...overrides });
   game.anchor = 0; game.state = 'playing';
   return game;
 }
@@ -89,7 +89,7 @@ test('速度を10倍まで保存でき、速度と入力機器を変えても判
   assert.equal(clampSetting(definition, 10), 10);
   assert.equal(clampSetting(definition, 100), 10);
   assert.equal(clampSetting(definition, 0), 0.6);
-  assert.equal(DEFAULT_SETTINGS.speed, 1);
+  assert.equal(DEFAULT_SETTINGS.speed, 2.5);
   for (const speed of [0.6, 1, 10]) for (const source of ['keyboard', 'left', 'right']) {
     const game = gameFixture(1, { speed, offset: 30 });
     assert.equal(game.hit(0, 1.05, source), 'perfectPlus');

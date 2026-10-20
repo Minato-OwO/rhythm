@@ -12,6 +12,7 @@ import { VRInput } from './vr-input.js';
 import { SpatialUI } from './spatial-ui.js';
 import { TimelineEffects } from './timeline-effects.js';
 import { BackgroundEffects } from './background-effects.js';
+import { downloadSettings } from './settings-export.js';
 
 const storageKey = 'fourflow.settings.v1';
 const settings = { ...DEFAULT_SETTINGS };
@@ -225,6 +226,15 @@ async function bootstrap() {
       if (name.startsWith('panel')) ui.layoutChanged();
       try { localStorage.setItem(storageKey, JSON.stringify(settings)); } catch { /* 保存不可でもプレイ可能。 */ }
       ui.invalidate('menu');
+    },
+    exportSettings: () => {
+      if (actionBusy) return;
+      try {
+        downloadSettings(settings);
+        ui.setMessage('');
+      } catch {
+        ui.setMessage('設定ファイルを書き出せませんでした。');
+      }
     },
     resetGaugeLengths: () => {
       if (actionBusy) return;

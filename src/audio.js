@@ -1,3 +1,5 @@
+import { DEFAULT_SETTINGS } from './config.js';
+
 // 10秒の反復再生で測定したラウドネス差を補正。通常ヒット -26.55 LUFS / LN -13.05 LUFS。
 export const HOLD_SOUND_GAIN_DB = -13.50;
 // 素材自体の音量が低いため、SE共通の基準ゲインを上げる。保存済みの音量設定にも適用する。
@@ -9,8 +11,8 @@ export class AudioTransport {
   constructor() {
     this.context = null;
     this.nodes = new Set();
-    this.volume = 0.6;
-    this.hitVolume = 0.6;
+    this.volume = DEFAULT_SETTINGS.volume / 100;
+    this.hitVolume = DEFAULT_SETTINGS.hitVolume / 100;
     this.hitNodes = new Set();
     this.hitBuffer = null;
     this.hitSoundPromise = null;

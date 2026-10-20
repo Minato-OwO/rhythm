@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from '../src/config.js';
 
 test('曲の後半で過去の判定済み始点を毎入力読み直さず、リセットで先頭へ戻る', () => {
   const notes = Array.from({ length: 4000 }, (_, id) => ({ id, time: id, lane: 0, endTime: null }));
-  const game = new RhythmGame({ notes, duration: 4001 }, { now: 0 }, { ...DEFAULT_SETTINGS });
+  const game = new RhythmGame({ notes, duration: 4001 }, { now: 0 }, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   let reads = 0;
   for (const note of game.notes.slice(0, 3990)) {
@@ -25,7 +25,7 @@ test('近い方の未判定ノーツを選び、LNの始点通過後も次のノ
     { id: 1, time: 1.2, lane: 0, endTime: null },
     { id: 2, time: 1.28, lane: 0, endTime: null },
   ];
-  const game = new RhythmGame({ notes, duration: 5 }, { now: 0 }, { ...DEFAULT_SETTINGS });
+  const game = new RhythmGame({ notes, duration: 5 }, { now: 0 }, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   assert.equal(game.hit(0, 1), 'perfectPlus');
   assert.equal(game.notes[0].started, true);

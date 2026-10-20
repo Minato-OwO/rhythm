@@ -50,7 +50,7 @@ test('600k・900kの境界を、追加点込みのスコアで判定する', () 
     assert.equal(clearStatusForScore(score).id, expected, `score=${score}`);
   }
   const notes = Array.from({ length: 3 }, (_, id) => ({ id, time: id + 1, lane: id, endTime: null }));
-  const game = new RhythmGame({ notes, duration: 5 }, { now: 0 }, { ...DEFAULT_SETTINGS });
+  const game = new RhythmGame({ notes, duration: 5 }, { now: 0 }, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   game.hit(0, 1);
   game.hit(1, 2.03);
@@ -62,7 +62,7 @@ test('600k・900kの境界を、追加点込みのスコアで判定する', () 
 });
 
 test('左の残量バーはレーン1の外にあり、手前を固定して奥から手前へ減る', () => {
-  const parent = new Group(), gauges = new LaneGauges(T, parent);
+  const parent = new Group(), gauges = new LaneGauges(T, parent, null, { ...DEFAULT_SETTINGS, progressBarLength: 15 });
   assert.equal(gauges.root.parent, parent, 'レーンと同じ親の移動・傾きに追従する');
   const lane = runwaySurfaces()[0];
   near(gauges.remaining.position.x + gauges.remaining.scale.x / 2, lane.position.x - lane.width / 2);
@@ -82,7 +82,7 @@ test('左の残量バーはレーン1の外にあり、手前を固定して奥�
 });
 
 test('右のノルマバーは600k・900kの目印に一致し、金色と満タンへの切替を行う', () => {
-  const gauges = new LaneGauges(T, new Group());
+  const gauges = new LaneGauges(T, new Group(), null, { ...DEFAULT_SETTINGS, normaGaugeLength: 15 });
   const lane = runwaySurfaces()[3];
   near(gauges.norma.position.x - gauges.norma.scale.x / 2, lane.position.x + lane.width / 2);
   near(gauges.norma.position.y, lane.position.y + lane.height / 2 + 0.001);
@@ -100,7 +100,7 @@ test('右のノルマバーは600k・900kの目印に一致し、金色と満タ
 });
 
 test('ポーズ中の長さ変更でも残量とノルマを保ち、形状を作り直さず終了時に解放する', () => {
-  const settings = { ...DEFAULT_SETTINGS };
+  const settings = { ...DEFAULT_SETTINGS, progressBarLength: 15, normaGaugeLength: 15 };
   const gauges = new LaneGauges(T, new Group(), null, settings);
   const geometry = gauges.geometry, children = [...gauges.root.children];
   for (let frame = 0; frame < 120; frame++) gauges.update(700000, 50, 100);
@@ -118,8 +118,8 @@ test('ポーズ中の長さ変更でも残量とノルマを保ち、形状を�
   settings.progressBarLength = DEFAULT_SETTINGS.progressBarLength;
   settings.normaGaugeLength = DEFAULT_SETTINGS.normaGaugeLength;
   gauges.applyLayout();
-  near(gauges.remaining.scale.z, 7.5);
-  near(gauges.norma.scale.z, 10.5);
+  near(gauges.remaining.scale.z, DEFAULT_SETTINGS.progressBarLength / 2);
+  near(gauges.norma.scale.z, DEFAULT_SETTINGS.normaGaugeLength * 0.7);
   assert.deepEqual(gauges.root.children, children);
   assert.ok(children.every(mesh => mesh.geometry === geometry));
   gauges.dispose();

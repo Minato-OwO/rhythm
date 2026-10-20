@@ -21,7 +21,7 @@ function stageFixture(data) {
   const game = { chart, notes: chart.notes.map(note => ({ ...note, judged: false, started: false })), state: 'paused' };
   const stage = Object.create(StageView.prototype);
   Object.assign(stage, {
-    settings: { ...DEFAULT_SETTINGS }, laneRoot: {}, noteMeshes: new Map(), pool: [], noteFrame: 0,
+    settings: { ...DEFAULT_SETTINGS, speed: 1 }, laneRoot: {}, noteMeshes: new Map(), pool: [], noteFrame: 0,
     pressed: [false, false, false, false], flashes: [0, 0, 0, 0], scrollBounds: {},
     materials: [{}, {}, {}, {}], holdMaterials: [{}, {}, {}, {}], activeHoldMaterials: [{}, {}, {}, {}],
     pads: Array.from({ length: 4 }, () => ({ material: {} })), effects: { update() {} }, gauges: { update() {} },
@@ -224,7 +224,7 @@ test('エディタの追加・複製・Undo/Redo・JSON保存でspeedと範囲�
 test('speedで見た目を変えても判定時刻・判定幅は変わらない', () => {
   const chart = normalizeChart(source([{ timeSeconds: 0, type: 'speed', multiplier: -5 }]));
   const audio = { now: 0, update() {} };
-  const game = new RhythmGame(chart, audio, { ...DEFAULT_SETTINGS });
+  const game = new RhythmGame(chart, audio, { ...DEFAULT_SETTINGS, autoplay: 0 });
   game.state = 'playing'; game.anchor = 0;
   assert.equal(game.hit(0, 5.02), 'perfectPlus');
   assert.equal(game.hit(1, 6.045), 'perfect');

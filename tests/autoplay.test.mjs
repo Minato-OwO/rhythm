@@ -17,8 +17,8 @@ function fixture(notes, settings = {}, chartSettings = {}) {
   return { game, audio, hits, holds, step(time) { audio.now = game.anchor + time; game.update(); } };
 }
 
-test('オートは既定OFFで、ON/OFFを保存でき、通常プレイの判定を維持する', () => {
-  assert.equal(DEFAULT_SETTINGS.autoplay, 0);
+test('オートは既定ONで、ON/OFFを保存でき、通常プレイの判定を維持する', () => {
+  assert.equal(DEFAULT_SETTINGS.autoplay, 1);
   const definition = PLAY_SETTING_DEFINITIONS.find(item => item.key === 'autoplay');
   assert.equal(definition.type, 'toggle');
   assert.equal(clampSetting(definition, 5), 1);
