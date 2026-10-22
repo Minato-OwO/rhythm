@@ -1,0 +1,76 @@
+{
+  "songs": [
+    {
+      "id": "chronomia/chart_EZ.json",
+      "groupId": "folder:chronomia",
+      "songTitle": "Chronomia",
+      "title": "Chronomia [EZ]",
+      "artist": "Lime",
+      "difficulty": "EZ",
+      "flashWarning": true,
+      "flashWarningText": "",
+      "level": null,
+      "bpm": 227.00000000000006,
+      "chartUrl": "./songs/chronomia/chart_EZ.json",
+      "models": []
+    },
+    {
+      "id": "chronomia/chart_HD.json",
+      "groupId": "folder:chronomia",
+      "songTitle": "Chronomia",
+      "title": "Chronomia [HD]",
+      "artist": "Lime",
+      "difficulty": "HD",
+      "flashWarning": true,
+      "flashWarningText": "",
+      "level": null,
+      "bpm": 227,
+      "chartUrl": "./songs/chronomia/chart_HD.json",
+      "models": []
+    },
+    {
+      "id": "chronomia/chart_NM.json",
+      "groupId": "folder:chronomia",
+      "songTitle": "Chronomia",
+      "title": "Chronomia [NM]",
+      "artist": "Lime",
+      "difficulty": "NM",
+      "flashWarning": true,
+      "flashWarningText": "",
+      "level": null,
+      "bpm": 227.00000000000006,
+      "chartUrl": "./songs/chronomia/chart_NM.json",
+      "models": []
+    },
+    {
+      "id": "justify/chart_EZ.json",
+      "groupId": "folder:justify",
+      "songTitle": "JUSTiFY",
+      "title": "JUSTiFY [EZ]",
+      "artist": "Trina Lydia vs. Kuro",
+      "difficulty": "EZ",
+      "flashWarning": false,
+      "flashWarningText": "",
+      "level": null,
+      "bpm": 202.00000637003575,
+      "chartUrl": "./songs/justify/chart_EZ.json",
+      "models": []
+    },
+    {
+      "id": "neon-circuit",
+      "groupId": "folder:neon-circuit",
+      "songTitle": "Neon Circuit",
+      "title": "Neon Circuit",
+      "artist": "FOUR FLOW Demo",
+      "difficulty": "Normal",
+      "flashWarning": true,
+      "flashWarningText": "",
+      "level": null,
+      "bpm": 128,
+      "chartUrl": "./songs/neon-circuit/chart.json",
+      "models": [
+        "night_sky_visible_spectrum_monochromatic.glb"
+      ]
+    }
+  ]
+}

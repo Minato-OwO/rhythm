@@ -100,7 +100,7 @@ export async function droppedFiles(dataTransfer) {
 }
 
 export async function readServerSong(song) {
-  const chartUrl = new URL(song.chartUrl, location.origin + '/');
+  const chartUrl = new URL(song.chartUrl, new URL('../', document.baseURI));
   const response = await fetch(chartUrl, { cache: 'no-store' });
   if (!response.ok) throw new Error('譜面を読み込めませんでした。曲一覧を更新してください。');
   const source = await response.json();

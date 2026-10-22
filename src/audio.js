@@ -109,9 +109,9 @@ export class AudioTransport {
 
   syncHoldSound(game = this.hitSoundGame) {
     let held = false;
-    if (this.holdBuffer && this.hitVolume > 0 && this.context?.state === 'running' && game?.state === 'playing') {
+    if (this.holdBuffer && this.hitVolume > 0 && this.context?.state === 'running' && game?.state === 'playing' && !game.busy) {
       for (const note of game.activeHolds) {
-        if (note.holdSource === 'autoplay' || game.heldSources.get(note.holdSource)?.held[note.lane]) {
+        if (note.autoHeld || note.holdSource === 'autoplay' || game.heldSources.get(note.holdSource)?.held[note.lane]) {
           held = true;
           break;
         }

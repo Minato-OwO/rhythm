@@ -137,9 +137,13 @@ export function clampSetting(definition, value) {
   return Number((definition.min + Math.round((clamped - definition.min) / definition.step) * definition.step).toFixed(3));
 }
 
-// 短いLNも始点より前には完了させない。
+// 始点を叩いたLNは、終点100ms前から入力を離しても自動保持する。
+export function holdAssistTime(note) {
+  return note.endTime - CONFIG.hold.endToleranceSeconds;
+}
+
 export function holdCompletionTime(note) {
-  return Math.max(note.time, note.endTime - CONFIG.hold.endToleranceSeconds);
+  return note.endTime;
 }
 
 export function laneX(lane) {

@@ -1,5 +1,6 @@
 import { ChartDocument, EFFECTS, isRangeSV } from './editor/ChartDocument.js';
 import { ScrollTrack, SpeedTrack, SV_MULTIPLIER_LIMIT } from '../../src/scroll-track.js';
+import { loadSongCatalog } from '../../src/song-library.js';
 import { Timeline } from './editor/Timeline.js';
 import { PreviewEngine } from './editor/PreviewEngine.js';
 import { importOsuFiles } from './editor/OsuProject.js';
@@ -388,10 +389,7 @@ function chooseOsuDifficulty(maps) {
   });
 }
 async function refreshSongs() {
-  const response = await fetch('/api/songs', { cache: 'no-store' });
-  if (!response.ok) throw new Error('ゲームのサーバーを起動すると曲一覧を取得できます。フォルダからも開けます。');
-  const data = await response.json();
-  songs = data.songs ?? [];
+  songs = await loadSongCatalog(new URL('../', document.baseURI));
   const selectElement = $('server-song');
   const selectedId = selectElement.value;
   selectElement.replaceChildren(new Option('ゲームの曲', ''));

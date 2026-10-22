@@ -1,4 +1,4 @@
-import { CONFIG, JUDGEMENTS, holdCompletionTime } from './config.js';
+import { CONFIG, JUDGEMENTS, holdAssistTime, holdCompletionTime } from './config.js';
 import { clearStatusForScore } from './clear-status.js';
 
 const TIME_EPSILON = 1e-9;
@@ -42,7 +42,7 @@ export class RhythmGame extends EventTarget {
     // プレイ途中の設定変更で自動・手動が混ざらないよう、開始時の設定を保持する。
     this.autoplay = Boolean(this.settings.autoplay);
     this.autoCursor = 0;
-    this.notes = this.chart.notes.map(note => ({ ...note, judged: false, started: false }));
+    this.notes = this.chart.notes.map(note => ({ ...note, judged: false, started: false, autoHeld: false }));
     this.activeHolds = new Set();
     this.heldSources = new Map();
     this.lanes = Array.from({ length: 4 }, (_, lane) => this.notes.filter(note => note.lane === lane));
@@ -88,6 +88,10 @@ export class RhythmGame extends EventTarget {
     if (this.busy || this.state !== 'playing') return;
     this.busy = true;
     try {
+      const time = this.songTime - (this.autoplay ? 0 : this.settings.offset / 1000);
+      for (const note of this.activeHolds) {
+        if (this.heldSources.get(note.holdSource)?.held[note.lane] && time + TIME_EPSILON >= holdAssistTime(note)) note.autoHeld = true;
+      }
       await this.audio.pause();
       this.state = 'paused';
       this.emit('statechange');
@@ -103,7 +107,7 @@ export class RhythmGame extends EventTarget {
       await this.audio.resume();
       const time = this.songTime - this.settings.offset / 1000;
       for (const note of this.activeHolds) {
-        if (note.holdSource === 'autoplay') continue;
+        if (note.holdSource === 'autoplay' || note.autoHeld) continue;
         note.holdGraceUntil = time + CONFIG.hold.resumeGraceSeconds;
         note.releaseTime = time;
         note.awaitingResume = true;
@@ -172,6 +176,8 @@ export class RhythmGame extends EventTarget {
       note.headDelta = deltaMs;
       note.holdSource = source;
       note.holdStartTime = time;
+      note.autoHeld = source === 'autoplay' || time + TIME_EPSILON >= holdAssistTime(note);
+      note.awaitingResume = false;
       note.releaseTime = null;
       note.holdGraceUntil = time + (source === 'keyboard' ? 0 : CONFIG.hold.trackingGraceSeconds);
       this.activeHolds.add(note);
@@ -199,33 +205,35 @@ export class RhythmGame extends EventTarget {
     if (released) input.released[lane] = rawTime - this.settings.offset / 1000;
     input.held[lane] = Number(held);
     // キーを離してすぐ押し直しても、フレームの間でLNの切断が消えないようにする。
-    if (released && source === 'keyboard' && this.state === 'playing' && !this.busy) this.updateHolds(input.released[lane]);
+    if (released && this.state === 'playing' && !this.busy) this.updateHolds(input.released[lane], rawTime);
     if (changed) this.emit('holdinput');
   }
 
   releaseSource(source) { for (let lane = 0; lane < 4; lane++) this.setHeld(lane, false, source); }
   held(lane) {
-    if (this.autoplay) {
-      for (const note of this.activeHolds) if (note.lane === lane) return true;
-    } else {
+    for (const note of this.activeHolds) if (note.lane === lane && (note.autoHeld || this.autoplay)) return true;
+    if (!this.autoplay) {
       for (const input of this.heldSources.values()) if (input.held[lane]) return true;
     }
     return false;
   }
 
-  updateHolds(time) {
+  updateHolds(time, songTime = time) {
     for (const note of this.activeHolds) {
       const completeTime = holdCompletionTime(note);
-      if (note.holdSource === 'autoplay') {
-        if (time >= completeTime) this.judge(note, note.headRating, note.headDelta, 'autoplay');
+      const assistTime = holdAssistTime(note);
+      if (note.autoHeld || note.holdSource === 'autoplay') {
+        // 成功条件を満たしても、表示・保持音・加点は譜面の実際の終点まで維持する。
+        if (songTime >= completeTime) this.judge(note, note.headRating, note.headDelta, note.holdSource);
         continue;
       }
       const input = this.heldSources.get(note.holdSource);
       if (input?.held[note.lane]) {
         note.releaseTime = null;
         note.awaitingResume = false;
-        // 終点100ms前まで維持できれば完了。離す時刻による精度判定はしない。
-        if (time >= completeTime) this.judge(note, note.headRating, note.headDelta, note.holdSource);
+        if (time + TIME_EPSILON >= assistTime || songTime >= completeTime) note.autoHeld = true;
+        // 入力オフセットを、表示と保持音が終了する譜面時刻には加えない。
+        if (songTime >= completeTime) this.judge(note, note.headRating, note.headDelta, note.holdSource);
         continue;
       }
       note.releaseTime ??= Math.max(note.holdStartTime, input?.released[note.lane] ?? time);
@@ -234,9 +242,10 @@ export class RhythmGame extends EventTarget {
         if (time >= note.holdGraceUntil) this.judge(note, 'miss');
         continue;
       }
-      // フレーム間で離した場合も、実際の入力時刻が完了時刻を過ぎていれば成功。
-      if (note.releaseTime >= completeTime) {
-        this.judge(note, note.headRating, note.headDelta, note.holdSource);
+      // フレーム間で100ms前を跨いで離しても、入力時刻から自動保持へ移行する。
+      if (note.releaseTime + TIME_EPSILON >= assistTime) {
+        note.autoHeld = true;
+        if (songTime >= completeTime) this.judge(note, note.headRating, note.headDelta, note.holdSource);
         continue;
       }
       if (time < note.holdGraceUntil) continue;
@@ -264,7 +273,7 @@ export class RhythmGame extends EventTarget {
     this.audio.update();
     const time = this.songTime;
     if (this.autoplay) this.updateAutoplay(time);
-    this.updateHolds(this.autoplay ? time : time - this.settings.offset / 1000);
+    this.updateHolds(this.autoplay ? time : time - this.settings.offset / 1000, time);
     // 正オフセット分だけMISS確定も遅らせ、補正済み入力の猶予を残す。
     const deadline = time - CONFIG.windows.good - Math.max(0, this.settings.offset / 1000);
     while (this.missCursor < this.notes.length && this.notes[this.missCursor].time < deadline) {
