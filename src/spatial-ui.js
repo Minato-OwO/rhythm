@@ -47,6 +47,7 @@ export class SpatialUI {
     this.root = new T.Group();
     scene.object3D.add(this.root);
     this.panels = [];
+    this.infoOpen = false;
     this.settingsOpen = false;
     this.settingsReturnToSongs = false;
     this.settingsTab = 'play';
@@ -241,8 +242,19 @@ export class SpatialUI {
     if (wasVisible !== this.busyVisible) this.invalidate();
   }
   setMessage(value) { if (value !== this.message) { this.message = value; this.notice.dirty = true; } }
+  showInfo() {
+    if (this.busy || this.inputBlocked || this.game.state !== 'idle' || this.settingsOpen || this.songSelectionOpen) return;
+    this.infoOpen = true;
+    this.center.dirty = true;
+  }
+  closeInfo() {
+    if (!this.infoOpen) return;
+    this.infoOpen = false;
+    this.center.dirty = true;
+  }
   showSettings() {
     if (this.settingsOpen) return;
+    this.closeInfo();
     this.settingsReturnToSongs = this.songSelectionOpen;
     this.closeSongSelection();
     this.settingsCenterPosition.copy(this.menuAnchorPosition);
@@ -261,6 +273,7 @@ export class SpatialUI {
     this.invalidate('stats');
   }
   showSongSelection() {
+    this.closeInfo();
     this.closeSettings(false);
     this.songOrder = null;
     this.songSelectionOpen = true;
@@ -337,6 +350,7 @@ export class SpatialUI {
   }
 
   screenViewKey() {
+    if (this.infoOpen) return 'info';
     if (this.settingsOpen) return 'settings';
     if (this.songSelectionOpen) return 'songs';
     return this.game.state;
@@ -379,6 +393,7 @@ export class SpatialUI {
       return 'song-card:' + (song?.id ?? 'empty') + ':' + (song?.id === this.songLibrary.selectedId);
     }
     if (panel === this.center) {
+      if (this.infoOpen) return 'info';
       if (this.settingsOpen) return 'settings:' + this.settingsTab + (this.settingsTab === 'panels' ? ':' + this.panelTarget : '');
       if (this.songSelectionOpen) return 'songs:' + this.songPage + ':' + this.songLibrary.selectedId + ':' + (this.songSort ?? 'title') + ':' + Boolean(this.songSortDescending);
       return this.game.state;
@@ -587,7 +602,7 @@ export class SpatialUI {
     });
     const label = this.songSelectionOpen ? 'この曲をプレイ' : game.state === 'playing' ? '一時停止' : game.state === 'paused' ? '再開する' : game.state === 'finished' ? 'もう一度プレイ' : 'プレイする';
     const playable = this.canPlaySelection();
-    this.button(panel, 'toggle', label, 48, 756, 672, 78, this.songSelectionOpen ? this.actions.startSelected : this.actions.toggle, { primary: true, disabled: this.settingsOpen || this.songSelectionOpen && !playable });
+    this.button(panel, 'toggle', label, 48, 756, 672, 78, this.songSelectionOpen ? this.actions.startSelected : this.actions.toggle, { primary: true, disabled: this.infoOpen || this.settingsOpen || this.songSelectionOpen && !playable });
     this.button(panel, 'songs', '選曲', 48, 858, 208, 78, this.actions.songs);
     this.button(panel, 'settings', '設定', 280, 858, 208, 78, this.actions.settings);
     this.button(panel, 'vr', this.scene.is('vr-mode') ? 'VRを終了' : 'VRでプレイ', 512, 858, 208, 78, this.actions.switchVR);
@@ -632,6 +647,7 @@ export class SpatialUI {
       });
       if (game.autoplay) this.text(panel, 'AUTO PLAY / 自己ベストには保存されません', 550, 699, 24, WARNING, 'center');
     } else {
+      if (game.state === 'idle') this.button(panel, 'info', 'Info', 900, 27, 150, 54, () => this.showInfo());
       this.text(panel, 'Four keys.', 550, 220, 102, INK, 'center', 500);
       this.text(panel, 'One flow.', 550, 334, 88, CYAN, 'center', 300);
       this.text(panel, inVR ? 'レーンに合わせてコントローラーを振り下ろす' : 'ノーツがラインに届いたら D / F / J / K', 550, 471, 31, INK, 'center');
@@ -648,6 +664,26 @@ export class SpatialUI {
       this.button(panel, 'settings', '設定', 70, 848, 465, 72, this.actions.settings);
       this.button(panel, 'vr', inVR ? 'VRを終了' : 'VRでプレイ', 565, 848, 465, 72, this.actions.switchVR);
     }
+    panel.texture.needsUpdate = true;
+  }
+
+  drawInfo() {
+    const panel = this.center;
+    this.background(panel, 'INFO / クレジット');
+    this.text(panel, 'SOUND CREDITS', 70, 130, 42, INK, 'left', 600);
+    this.text(panel, 'UI操作音', 70, 200, 28, MUTED);
+    this.text(panel, 'ノーツLN音', 70, 460, 28, MUTED);
+    this.text(panel, 'ノーツタップ音', 70, 630, 28, MUTED);
+    for (const [id, label, url, y] of [
+      ['hazime', 'Hazime / Audiostock', 'https://audiostock.jp/artists/615', 240],
+      ['koji-nakamura', 'Koji Nakamura / Audiostock', 'https://audiostock.jp/artists/56626', 326],
+      ['kaw', 'Kaw / Audiostock', 'https://audiostock.jp/artists/7409', 500],
+      ['otologic', 'OtoLogic', 'https://otologic.jp/free/license.html', 670],
+    ]) {
+      this.button(panel, 'credit-' + id, label, 70, y, 960, 68, () => window.open(url, '_blank', 'noopener,noreferrer'));
+    }
+    this.text(panel, '各クレジットを選択するとリンク先を別タブで開きます', 550, 793, 24, MUTED, 'center');
+    this.button(panel, 'info-close', '戻る', 70, 848, 960, 72, () => this.closeInfo(), { primary: true });
     panel.texture.needsUpdate = true;
   }
 
@@ -1064,7 +1100,8 @@ export class SpatialUI {
       else if (panel === this.startPanel) this.drawSelectionStart();
       else if (panel.songSlot !== undefined) this.drawSongCard(panel);
       else if (panel === this.center) {
-        if (this.settingsOpen) this.drawSettings();
+        if (this.infoOpen) this.drawInfo();
+        else if (this.settingsOpen) this.drawSettings();
         else if (this.songSelectionOpen) this.drawSongSelection();
         else if (this.game.state === 'paused') this.drawPause();
         else this.drawMenu();

@@ -3,7 +3,7 @@ export const UI_SOUND_FILES = Object.freeze({ start: 'start.mp3', change_diff: '
 export function controlSound(id, gameState = 'idle') {
   if (id === 'songs-play') return 'start';
   if (/^difficulty-[ENHX]$/.test(id)) return 'change_diff';
-  if (['songs-close', 'pause-leave', 'close'].includes(id)) return 'back';
+  if (['songs-close', 'pause-leave', 'close', 'info-close'].includes(id)) return 'back';
   if (id === 'songs' && gameState !== 'idle') return 'back';
   return 'press';
 }

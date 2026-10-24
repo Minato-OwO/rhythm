@@ -176,7 +176,7 @@ async function bootstrap() {
     },
     toggle: () => runAction(async () => {
       if (playTransition.active) return;
-      if (ui.settingsOpen) return;
+      if (ui.infoOpen || ui.settingsOpen) return;
       if (ui.songSelectionOpen) { await startSelectedSong(); return; }
       if (game.state === 'idle') { ui.showSongSelection(); return; }
       if (game.state === 'playing') await game.pause();
@@ -203,6 +203,7 @@ async function bootstrap() {
     }),
     title: () => runAction(async () => {
       await game.exit();
+      ui.closeInfo();
       ui.closeSettings(false);
       ui.closeSongSelection();
     }),
@@ -345,7 +346,7 @@ async function bootstrap() {
       await game.pause();
     }),
     select: source => ui.selectXR(source),
-    canQuickStart: () => !playTransition.active && !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
+    canQuickStart: () => !playTransition.active && !ui.infoOpen && !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
     updatePointers: (frame, space, sources) => ui.updateXR(frame, space, sources),
     clearPointers: () => ui.clearXR(),
   };
@@ -358,6 +359,7 @@ async function bootstrap() {
 
   game.addEventListener('statechange', () => {
     frameClock.synchronize();
+    if (game.state !== 'idle') ui.closeInfo();
     if (game.state === 'playing') {
       ui.closeSettings(false);
       ui.closeSongSelection();
@@ -400,6 +402,16 @@ async function bootstrap() {
 
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+    if (ui.infoOpen) {
+      if (event.code === 'Escape') {
+        event.preventDefault();
+        if (!event.repeat && !actionBusy && !playTransition.active && !ui.inputBlocked) {
+          actions.playUISound('back');
+          ui.closeInfo();
+        }
+      }
+      return;
+    }
     const lane = CONFIG.keys.indexOf(event.code);
     if (lane !== -1) {
       event.preventDefault();
