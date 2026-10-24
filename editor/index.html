@@ -17,6 +17,7 @@
         <button id="btn-osu-import">OSZ / OSU読込</button>
         <button id="btn-audio">音声を選ぶ</button>
         <button id="btn-model">GLBを追加</button>
+        <button id="btn-skin">スキン画像を追加</button>
         <select id="server-song" class="ui-select" aria-label="ゲームの曲"><option value="">ゲームの曲</option></select>
         <button id="btn-server-open">開く</button>
         <button id="btn-refresh" title="ゲームの曲一覧を更新">更新</button>
@@ -26,10 +27,11 @@
           <option value="0">0 / D</option><option value="1">1 / F</option><option value="2">2 / J</option><option value="3">3 / K</option>
         </select>
         <button id="btn-add-note">＋ノーツ</button>
-        <select id="note-kind" class="ui-select" aria-label="ノーツの種類"><option value="tap">タップ</option><option value="hold">LN</option></select>
+        <select id="note-kind" class="ui-select" aria-label="ノーツの種類"><option value="tap">タップ</option><option value="hold">LN</option><option value="fakeTap">フェイクTAP</option><option value="fakeHold">フェイクLN</option></select>
         <button id="btn-add-sv">＋全体SV</button>
         <select id="effect-type" class="ui-select" aria-label="追加する演出">
           <option value="backgroundStage">標準ステージ</option>
+          <option value="noteSkin">ノーツスキン変更</option>
           <option value="lanePulse">レーン発光</option><option value="laneColor">レーン色変更</option><option value="screenFlash">画面フラッシュ</option><option value="screenFade">画面フェード</option>
           <option value="backgroundColor">背景色変更</option><option value="backgroundPulse">背景パルス</option><option value="backgroundStars">星</option><option value="backgroundGLB">背景GLB</option>
           <option value="backgroundScene">背景シーン(JS)</option>
@@ -47,7 +49,7 @@
         <label for="snap-mode" title="拍のライン：1/1＝白、1/2＝赤、1/3＝紫、1/4＝青、1/8＝黄">スナップ</label>
         <select id="snap-mode" class="ui-select"><option value="beat">拍</option><option value="ms">ms</option></select>
         <select id="snap-beat-div" class="ui-select" aria-label="拍の間隔">
-          <option value="4">4拍（白）</option><option value="1">1拍（白）</option><option value="0.5">1/2拍（赤）</option><option value="0.3333333333333333">1/3拍（紫）</option><option value="0.25" selected>1/4拍（青）</option><option value="0.125">1/8拍（黄）</option>
+          <option value="32">32拍（32/1・白）</option><option value="16">16拍（白）</option><option value="8">8拍（白）</option><option value="4">4拍（白）</option><option value="2">2拍（白）</option><option value="1">1拍（白）</option><option value="0.5">1/2拍（赤）</option><option value="0.3333333333333333">1/3拍（紫）</option><option value="0.25" selected>1/4拍（青）</option><option value="0.125">1/8拍（黄）</option><option value="0.0625">1/16拍（水色）</option><option value="0.03125">1/32拍（水色）</option>
         </select>
         <input id="snap-ms-val" type="number" min="1" step="1" value="100" aria-label="スナップ間隔（ms）" hidden />
         <label><input id="metronome-toggle" type="checkbox" /> メトロノーム</label>
@@ -74,7 +76,7 @@
         <div class="drop-zone-content">
           <h2>FOUR FLOW Editor</h2>
           <p>曲フォルダをドロップ</p>
-          <p class="drop-hint">chart.jsonの曲フォルダ・OSZ・OSUに対応</p>
+          <p class="drop-hint">chart_E / N / H / X.jsonの曲フォルダ・OSZ・OSUに対応</p>
           <p class="drop-hint">上の「曲フォルダを開く」「新規」からも始められます</p>
         </div>
       </div>
@@ -85,7 +87,7 @@
   <div id="timeline-panel">
     <div class="panel-header timeline-header">
       <span>タイムライン</span>
-      <span class="timeline-hint">ダブルクリックで追加 / ドラッグで移動 / 端で長さ変更 / Shiftでスナップ解除</span>
+      <span class="timeline-hint">Ctrl＋ドラッグで範囲選択 / 選択項目をドラッグで一括移動 / 端で長さ変更 / Shiftでスナップ解除</span>
       <div class="zoom-controls"><button id="btn-zoom-out">−</button><button id="btn-zoom-in">＋</button><span id="bpm-display"></span><span id="offset-display"></span><span id="sv-display" title="再生位置の従来SV倍率とspeed倍率">SV ×1 / SPEED ×1</span></div>
     </div>
     <div class="timeline-container" id="timeline-container">
@@ -105,7 +107,7 @@
 <input id="osu-input" type="file" accept=".osz,.osu,.mp3,.ogg,.wav,.m4a,.flac,.aac,.opus" multiple hidden />
 <dialog id="osu-difficulty-dialog">
   <form method="dialog">
-    <h2>読み込む4K譜面を選択</h2>
+    <h2>読み込む譜面を選択</h2>
     <label>難易度 <select id="osu-difficulty" aria-label="読み込む難易度"></select></label>
     <div class="property-actions"><button value="cancel">閉じる</button><button value="open" class="primary-btn">開く</button></div>
   </form>

@@ -18,14 +18,17 @@ export class VRInput {
     this.rig = scene.querySelector('#rig').object3D;
     this.onSelect = event => {
       if (this.actions.select?.(event.inputSource)) return;
-      if (this.actions.canQuickStart?.() !== false && this.game.state !== 'playing') this.actions.toggle();
+      if (this.actions.canQuickStart?.() !== false && this.game.state !== 'playing') {
+        this.actions.playUISound?.('press');
+        this.actions.toggle();
+      }
     };
     this.onSqueeze = () => {
       const now = performance.now();
       if (now - this.lastGrip < 400) return;
       this.lastGrip = now;
-      if (this.game.state === 'playing') this.actions.pause();
-      else if (this.game.state === 'paused') this.actions.resume();
+      if (this.game.state === 'playing') { this.actions.playUISound?.('press'); this.actions.pause(); }
+      else if (this.game.state === 'paused') { this.actions.playUISound?.('press'); this.actions.resume(); }
     };
     this.onVisibility = () => {
       this.reset();
@@ -112,7 +115,7 @@ export class VRInput {
       if (source.targetRayMode !== 'tracked-pointer' || !source.gripSpace || !['left', 'right'].includes(source.handedness)) continue;
       const hand = this.handFor(source);
       const stickDown = Boolean(source.gamepad?.buttons[3]?.pressed);
-      if (stickDown && !hand.stickDown) this.actions.recenter();
+      if (stickDown && !hand.stickDown) { this.actions.playUISound?.('press'); this.actions.recenter(); }
       hand.stickDown = stickDown;
       const pose = frame.getPose(source.gripSpace, referenceSpace);
       if (!pose || pose.emulatedPosition) {

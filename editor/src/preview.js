@@ -3,6 +3,7 @@ import { StageView } from '../../src/view.js';
 import { TimelineEffects } from '../../src/timeline-effects.js';
 import { BackgroundEffects } from '../../src/background-effects.js';
 import { RenderResolution } from '../../src/render-resolution.js';
+import { ChartNoteSkins } from '../../src/chart-note-skins.js';
 
 async function init() {
   if (!window.AFRAME) throw new Error('3Dプレビューを読み込めませんでした。接続を確認して再読み込みしてください。');
@@ -14,19 +15,22 @@ async function init() {
   if (!scene.canvas) await new Promise(resolve => scene.addEventListener('render-target-loaded', resolve, { once: true }));
   const settings = { ...DEFAULT_SETTINGS };
   const view = new StageView(scene, settings);
+  const noteSkinTrack = new ChartNoteSkins(view.noteSkins);
   const renderResolution = new RenderResolution(scene);
   let chart = { notes: [], events: [], duration: 60 };
   const timeline = new TimelineEffects(scene, view, settings, chart);
   const background = new BackgroundEffects(scene, view, chart);
   let judgedCount = 0;
   const game = {
-    state: 'paused', chart, notes: [], songTime: 0,
-    get score() { return this.notes.length ? Math.round(judgedCount / this.notes.length * CONFIG.baseScore) + judgedCount : 0; },
+    state: 'paused', chart, notes: [], playableNotes: [], songTime: 0,
+    get totalNotes() { return this.playableNotes.length; },
+    get score() { return this.totalNotes ? Math.round(judgedCount / this.totalNotes * CONFIG.baseScore) + judgedCount : 0; },
   };
   const activeHolds = new Set();
   let previous = -Infinity;
   let hitCursor = 0;
   let revision = 0;
+  let skinsReady = false;
   function reset() {
     view.clearNotes(); timeline.reset(); background.reset(); previous = -Infinity; hitCursor = 0;
     activeHolds.clear();
@@ -40,13 +44,17 @@ async function init() {
       chart = data.chart;
       game.chart = chart;
       game.notes = chart.notes.map(note => ({ ...note, judged: false }));
+      game.playableNotes = game.notes.filter(note => !note.fake);
       timeline.setChart(chart);
       background.setChart(chart);
       reset();
       revision = data.revision;
+      skinsReady = false;
       const loadingRevision = revision;
-      background.preload().then(() => {
+      Promise.all([background.preload(), noteSkinTrack.preload(chart)]).then(() => {
         if (loadingRevision !== revision) return;
+        noteSkinTrack.setChart(chart);
+        skinsReady = true;
         document.getElementById('error').textContent = '';
         parent.postMessage({ channel: 'four-flow-preview', type: 'prepared', revision }, location.origin);
       }).catch(error => {
@@ -72,11 +80,11 @@ async function init() {
       const now = performance.now();
       clock.sample(frameState);
       // 譜面メッセージの到着前に、新しい時計で古いSVを描画しない。
-      if (frameState.revision !== revision) return;
+      if (frameState.revision !== revision || !skinsReady) return;
       const time = Math.max(0, Math.min(chart.duration, frameState.time));
       if (time < previous) reset();
-      while (hitCursor < game.notes.length && (game.notes[hitCursor].time < time || frameState.playing && game.notes[hitCursor].time <= time)) {
-        const note = game.notes[hitCursor++];
+      while (hitCursor < game.playableNotes.length && (game.playableNotes[hitCursor].time < time || frameState.playing && game.playableNotes[hitCursor].time <= time)) {
+        const note = game.playableNotes[hitCursor++];
         if (note.endTime !== null && note.endTime !== undefined && time < holdCompletionTime(note)) {
           note.started = true; activeHolds.add(note);
         } else { note.judged = true; judgedCount++; }
@@ -88,6 +96,7 @@ async function init() {
       // 停止中のシークでも画面演出を確認できるよう、演出は再生表示として評価する。
       timeline.update(time, 'playing');
       background.update(time, 'playing');
+      noteSkinTrack.update(time);
       view.update(game, now, time);
       previous = time;
     },

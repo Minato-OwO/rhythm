@@ -1,6 +1,7 @@
 {
   "version": 1,
   "title": "Neon Circuit",
+  "difficulty": "N",
   "artist": "FOUR FLOW Demo",
   "bpm": 128,
   "audio": "./audio.wav",

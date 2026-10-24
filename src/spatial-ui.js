@@ -1,6 +1,10 @@
 import { CONFIG, JUDGEMENTS, PLAY_SETTING_DEFINITIONS, LANE_SETTING_DEFINITIONS, GAUGE_SETTING_DEFINITIONS, EFFECT_SETTING_DEFINITIONS, PANEL_GROUPS, PANEL_SETTING_DEFINITIONS, PANEL_OFFSET_DEFINITIONS, PAIRED_PANEL_ANGLE_SETTING } from './config.js';
 import { clearStatusForScore } from './clear-status.js';
 import { intersectPanel } from './panel-hit.js';
+import { SongSelectionStage, SONGS_PER_PAGE, SONG_CARD_LAYOUT, SONG_LIST_OUTLINE, START_OUTLINE, containsPolygon, songAccent } from './song-selection-stage.js';
+import { DIFFICULTIES } from './difficulties.js';
+import { sortSongs } from './song-selection-model.js';
+import { controlSound } from './ui-sounds.js';
 
 const INK = '#edf5ff';
 const MUTED = '#8da3bd';
@@ -35,6 +39,8 @@ export class SpatialUI {
     this.songLibrary = songLibrary;
     this.songSelectionOpen = false;
     this.songPage = 0;
+    this.songSort = 'title';
+    this.songSortDescending = false;
     this.difficultyPage = 0;
     this.T = AFRAME.THREE;
     const T = this.T;
@@ -76,10 +82,22 @@ export class SpatialUI {
     this.right = this.makePanel('stats', 0.8, 1.03, 768, 990, settings.panelRightX, settings.panelRightY, -settings.panelRightDistance, settings.panelRightYaw * Math.PI / 180);
     this.sidePanels = [this.left, this.right];
     this.center = this.makePanel('menu', 1.42, 1.25, 1100, 968, settings.panelCenterX, settings.panelCenterY, -settings.panelCenterDistance);
-    this.details = this.makePanel('details', 1.12, 1.4, 1000, 1250, 0, settings.panelCenterY, -settings.panelCenterDistance);
+    this.details = this.makePanel('details', 1.35, 1.04, 1200, 930, 0, settings.panelCenterY, -settings.panelCenterDistance);
     this.details.mesh.visible = false;
+    this.difficultyPanel = this.makePanel('difficulties', 1.35, 0.18, 1200, 160, 0, 0, 0);
+    this.startPanel = this.makePanel('selection-start', 0.23, 0.26, 220, 250, 0, 0, 0);
+    this.startPanel.containsPoint = (x, y) => containsPolygon(START_OUTLINE, x, y);
+    this.songCards = Array.from({ length: SONGS_PER_PAGE }, (_, index) => {
+      const card = this.makePanel('song-card-' + index,
+        SONG_CARD_LAYOUT.width / this.center.canvas.width * this.center.width,
+        SONG_CARD_LAYOUT.height / this.center.canvas.height * this.center.height,
+        1000, 140, 0, 0, 0);
+      card.songSlot = index;
+      return card;
+    });
+    this.selectionStage = new SongSelectionStage(T, this.center, this.details, this.songCards, this.difficultyPanel, this.startPanel);
     this.notice = this.makePanel('notice', 1.55, 0.18, 1240, 144, settings.panelCenterX, settings.panelCenterY + 0.8, -settings.panelCenterDistance - 0.05);
-    this.drawOrder = [this.notice, this.center, this.details, this.right, this.left];
+    this.drawOrder = [this.notice, this.center, this.details, this.difficultyPanel, this.startPanel, ...this.songCards, this.right, this.left];
     this.progressFill = this.makeOverlay(this.left, 48, 530, 672, 12, CYAN);
     this.progressLeft = this.progressFill.position.x - this.progressFill.geometry.parameters.width / 2;
     this.keyFlashes = CONFIG.colors.map((color, lane) => this.makeOverlay(this.left, 48 + lane * 172, 637, 156, 76, color, true));
@@ -94,7 +112,7 @@ export class SpatialUI {
       this.countTexts[rating] = this.makeDynamicText(this.right, index % 2 ? 720 : 350, COUNT_START_Y + Math.floor(index / 2) * COUNT_ROW_HEIGHT, 23, color, 'right');
     });
     this.statsDirty = true;
-    this.durationText = formatTime(game.chart.duration);
+    this.durationText = formatTime(game.duration ?? game.chart.duration);
     this.bindMouse();
     this.update(performance.now());
   }
@@ -110,7 +128,7 @@ export class SpatialUI {
     texture.generateMipmaps = false;
     texture.minFilter = T.LinearFilter;
     texture.magFilter = T.LinearFilter;
-    const material = new T.MeshBasicMaterial({ map: texture, toneMapped: false, side: T.DoubleSide, transparent: true, opacity: 0, depthWrite: false });
+    const material = new T.MeshBasicMaterial({ map: texture, toneMapped: false, side: T.DoubleSide, transparent: true, opacity: 0, depthWrite: false, alphaTest: 1 / 255 });
     const mesh = new T.Mesh(new T.PlaneGeometry(width, height), material);
     mesh.position.set(x, y, z);
     mesh.rotation.y = yaw;
@@ -159,27 +177,49 @@ export class SpatialUI {
   markStatsDirty() { this.statsDirty = true; }
 
   chartChanged() {
-    this.durationText = formatTime(this.game.chart.duration);
+    this.durationText = formatTime(this.game.duration ?? this.game.chart.duration);
     this.lastTrackSecond = -1;
     this.lastTrackPercent = -1;
     this.statsDirty = true;
-    this.invalidate();
+    this.invalidate('track');
+    this.invalidate('stats');
+    this.invalidate('details');
+    if (!this.songSelectionOpen || this.settingsOpen) this.invalidate('menu');
   }
 
   selectedSong() { return this.songLibrary.songs.find(song => song.id === this.songLibrary.selectedId); }
+
+  selectionSongs() {
+    if (this.songOrderSource !== this.songLibrary.songs || !this.songOrder) {
+      this.songOrderSource = this.songLibrary.songs;
+      this.songOrder = sortSongs(this.songLibrary.songs, this.songSort, this.songSortDescending, this.songLibrary.personalBests);
+    }
+    return this.songOrder;
+  }
+
+  setSongSort(mode) {
+    this.songSortDescending = this.songSort === mode ? !this.songSortDescending : mode === 'score';
+    this.songSort = mode;
+    this.songOrder = null;
+    this.songPage = 0;
+    this.invalidate('menu');
+    for (const card of this.songCards) card.dirty = true;
+  }
 
   canPlaySelection() {
     return Boolean(this.selectedSong()?.difficulties.some(difficulty => difficulty.id === this.songLibrary.selectedDifficultyId));
   }
 
   selectionChanged() {
-    const index = this.songLibrary.songs.findIndex(song => song.id === this.songLibrary.selectedId);
-    this.songPage = Math.floor(Math.max(0, index) / 5);
+    this.songOrder = null;
+    const index = this.selectionSongs().findIndex(song => song.id === this.songLibrary.selectedId);
+    this.songPage = Math.floor(Math.max(0, index) / SONGS_PER_PAGE);
     const difficultyIndex = this.selectedSong()?.difficulties.findIndex(difficulty => difficulty.id === this.songLibrary.selectedDifficultyId) ?? 0;
     this.difficultyPage = Math.floor(Math.max(0, difficultyIndex) / 4);
-    this.invalidate('menu');
     this.invalidate('details');
     this.invalidate('stats');
+    this.invalidate('difficulties');
+    this.invalidate('selection-start');
   }
 
   updateStatsText() {
@@ -191,7 +231,15 @@ export class SpatialUI {
     this.statsDirty = false;
   }
 
-  setBusy(value) { if (value !== this.busy) { this.busy = value; this.invalidate(); } }
+  get busyVisible() { return Boolean(this.busy && !this.preserveSelectionAppearance); }
+
+  setBusy(value, { preserveSelectionAppearance = false } = {}) {
+    const wasVisible = this.busyVisible;
+    this.busy = value;
+    this.preserveSelectionAppearance = value && preserveSelectionAppearance;
+    // 曲・難易度の読込中は入力だけ止める。無効色→通常色の往復で点滅させない。
+    if (wasVisible !== this.busyVisible) this.invalidate();
+  }
   setMessage(value) { if (value !== this.message) { this.message = value; this.notice.dirty = true; } }
   showSettings() {
     if (this.settingsOpen) return;
@@ -214,6 +262,7 @@ export class SpatialUI {
   }
   showSongSelection() {
     this.closeSettings(false);
+    this.songOrder = null;
     this.songSelectionOpen = true;
     this.panelLayoutDirty = true;
     this.center.dirty = true;
@@ -260,6 +309,19 @@ export class SpatialUI {
     this.details.mesh.position.x += detailsOffset * cosine;
     this.details.mesh.position.z -= detailsOffset * sine;
     this.details.mesh.rotation.set(0, menuYaw, 0);
+    this.details.mesh.position.y += 0.105;
+    if (this.difficultyPanel) {
+      this.difficultyPanel.mesh.position.copy(this.details.mesh.position);
+      this.difficultyPanel.mesh.position.y -= 0.645;
+      this.difficultyPanel.mesh.rotation.set(0, menuYaw, 0);
+    }
+    if (this.startPanel) {
+      this.startPanel.mesh.position.copy(this.menuAnchorPosition);
+      this.startPanel.mesh.position.x += -0.04 * cosine + 0.07 * sine;
+      this.startPanel.mesh.position.y += 0.02;
+      this.startPanel.mesh.position.z += 0.04 * sine + 0.07 * cosine;
+      this.startPanel.mesh.rotation.set(0, menuYaw, 0);
+    }
     this.notice.mesh.position.copy(this.menuAnchorPosition);
     this.notice.mesh.position.y += 0.8;
     this.notice.mesh.position.z -= 0.05;
@@ -307,17 +369,23 @@ export class SpatialUI {
     if (!prepared) return;
     this.screenKey = this.pendingScreenKey;
     this.screenPhase = 'stable';
-    // 画像の準備が揃うまで透明を維持し、2枚を同じ時刻からフェードインする。
+    // 画像の準備が揃うまで透明を維持し、パネルと曲カードを同時にフェードインする。
     for (const panel of this.panels) if (panel.targetVisible) this.startPanelFade(panel, 1, now);
   }
 
   panelViewKey(panel) {
+    if (panel.songSlot !== undefined) {
+      const song = this.selectionSongs()[this.songPage * SONGS_PER_PAGE + panel.songSlot];
+      return 'song-card:' + (song?.id ?? 'empty') + ':' + (song?.id === this.songLibrary.selectedId);
+    }
     if (panel === this.center) {
       if (this.settingsOpen) return 'settings:' + this.settingsTab + (this.settingsTab === 'panels' ? ':' + this.panelTarget : '');
-      if (this.songSelectionOpen) return 'songs:' + this.songPage + ':' + this.songLibrary.selectedId;
+      if (this.songSelectionOpen) return 'songs:' + this.songPage + ':' + this.songLibrary.selectedId + ':' + (this.songSort ?? 'title') + ':' + Boolean(this.songSortDescending);
       return this.game.state;
     }
     if (panel === this.details) return 'details:' + this.songLibrary.selectedId + ':' + this.songLibrary.selectedDifficultyId + ':' + this.difficultyPage;
+    if (panel === this.difficultyPanel) return 'difficulties:' + this.songLibrary.selectedId + ':' + this.songLibrary.selectedDifficultyId;
+    if (panel === this.startPanel) return 'start:' + this.songLibrary.selectedId + ':' + this.songLibrary.selectedDifficultyId + ':' + this.settings.autoplay;
     if (panel === this.notice) return this.message;
     return panel.id;
   }
@@ -401,7 +469,7 @@ export class SpatialUI {
 
   canUpdatePanelInPlace(panel) {
     if (this.screenPhase !== 'stable' || !this.songSelectionOpen || this.settingsOpen) return false;
-    const prefix = panel === this.center ? 'songs:' : panel === this.details ? 'details:' : null;
+    const prefix = panel === this.center ? 'songs:' : panel === this.details ? 'details:' : panel === this.difficultyPanel ? 'difficulties:' : panel === this.startPanel ? 'start:' : panel.songSlot !== undefined ? 'song-card:' : null;
     return Boolean(prefix && panel.viewKey?.startsWith(prefix) && panel.desiredViewKey?.startsWith(prefix));
   }
 
@@ -417,7 +485,7 @@ export class SpatialUI {
   }
 
   panelInteractive(panel) {
-    return panel.targetVisible && panel.viewKey === panel.desiredViewKey && panel.displayOpacity >= 0.95 && panel.fadeTo === 1;
+    return !this.inputBlocked && panel.targetVisible && panel.viewKey === panel.desiredViewKey && panel.displayOpacity >= 0.95 && panel.fadeTo === 1;
   }
 
   text(panel, value, x, y, size = 28, color = INK, align = 'left', weight = 400) {
@@ -450,6 +518,7 @@ export class SpatialUI {
     const { ctx, canvas } = panel;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     panel.regions = [];
+    panel.containsPoint = null;
     ctx.fillStyle = '#0b1525';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = '#30465f';
@@ -485,7 +554,7 @@ export class SpatialUI {
     this.background(panel, 'FOUR FLOW / TRACK');
     this.text(panel, this.game.autoplay ? 'AUTO PLAY / 4 LANES' : this.scene.is('vr-mode') ? 'VR SWING / 4 LANES' : 'KEYBOARD / 4 KEYS', 48, 109, 23, this.game.autoplay ? CYAN : MUTED);
     this.wrap(panel, chart.title, 48, 180, 670, 51, 63, 3);
-    this.text(panel, `${chart.bpm} BPM   /   ${chart.notes.length} NOTES`, 48, 371, 25, MUTED);
+    this.text(panel, `${chart.bpm} BPM   /   ${this.game.totalNotes ?? chart.notes.filter(note => !note.fake).length} NOTES`, 48, 371, 25, MUTED);
     this.text(panel, 'PROGRESS', 48, 444, 22, CYAN);
     ctx.fillStyle = '#24374e';
     ctx.fillRect(48, 530, 672, 12);
@@ -582,35 +651,171 @@ export class SpatialUI {
     panel.texture.needsUpdate = true;
   }
 
+  selectionBox(panel, x, y, width, height, fill, stroke = null, radius = 12) {
+    const ctx = panel.ctx;
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, radius);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke(); }
+  }
+
+  selectionBackground(panel, title, accent = CYAN) {
+    const { ctx, canvas } = panel;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    panel.regions = [];
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#14283d');
+    gradient.addColorStop(0.45, '#0b1829');
+    gradient.addColorStop(1, '#08111f');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = '#2b4358';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+    ctx.fillStyle = accent;
+    ctx.fillRect(32, 0, 120, 4);
+    ctx.fillRect(canvas.width - 62, canvas.height - 4, 30, 4);
+    ctx.fillStyle = '#21384c';
+    ctx.fillRect(32, 88, canvas.width - 64, 1);
+    this.text(panel, title, 48, 46, 23, accent, 'left', 600);
+    for (let index = 0; index < 4; index++) {
+      ctx.fillStyle = CONFIG.colors[index];
+      ctx.fillRect(48 + index * 11, canvas.height - 16, 6, 2);
+    }
+  }
+
+  selectionButton(panel, id, label, x, y, width, height, activate, { primary = false, disabled = false, size = 24 } = {}) {
+    disabled ||= this.busyVisible;
+    const hovered = !disabled && this.isHovered(panel, id);
+    this.selectionBox(panel, x, y, width, height,
+      disabled ? '#101d2b' : primary ? hovered ? '#a9f2ff' : CYAN : hovered ? '#203a50' : '#132538',
+      disabled ? '#233446' : primary ? '#91edff' : hovered ? '#74b1cb' : '#314b61', 9);
+    this.text(panel, label, x + width / 2, y + height / 2, size,
+      disabled ? '#61768b' : primary ? '#061c29' : INK, 'center', 600);
+    panel.regions.push({ id, x, y, width, height, disabled, activate });
+  }
+
+  selectionPolygon(panel, points, fill, stroke) {
+    const ctx = panel.ctx;
+    ctx.beginPath();
+    points.forEach(([x, y], index) => ctx[index ? 'lineTo' : 'moveTo'](x, y));
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
+  }
+
+  drawSongCard(panel) {
+    const song = this.selectionSongs()[this.songPage * SONGS_PER_PAGE + panel.songSlot];
+    const { ctx, canvas } = panel;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    panel.regions = [];
+    if (!song) { panel.texture.needsUpdate = true; return; }
+    const selected = song.id === this.songLibrary.selectedId;
+    const hovered = this.isHovered(panel, 'song-' + song.id);
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0, selected ? '#174052' : hovered ? '#1c344c' : '#15283d');
+    gradient.addColorStop(1, selected ? '#102b3e' : '#0a1728');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = selected ? CYAN : songAccent(song.id);
+    ctx.fillRect(0, 0, selected ? 7 : 3, canvas.height);
+    this.text(panel, String(this.songPage * SONGS_PER_PAGE + panel.songSlot + 1).padStart(2, '0'), 46, 70, 27, selected ? CYAN : MUTED, 'center', 600);
+    this.wrap(panel, song.title, 98, 43, 665, 36, 42, 1, INK);
+    this.wrap(panel, song.artist || '—', 98, 101, 665, 24, 30, 1, selected ? '#a1c9d9' : MUTED);
+    const codes = DIFFICULTIES.filter(item => song.difficulties.some(chart => chart.difficulty === item.code)).map(item => item.code).join(' / ');
+    this.text(panel, codes, 955, 48, 22, selected ? CYAN : INK, 'right', 600);
+    this.text(panel, selected ? 'SELECTED' : 'CHARTS', 955, 103, 17, selected ? CYAN : MUTED, 'right', 600);
+    panel.regions.push({ id: 'song-' + song.id, x: 0, y: 0, width: canvas.width, height: canvas.height, disabled: this.busyVisible, activate: () => this.actions.chooseSong(song.id) });
+    panel.texture.needsUpdate = true;
+  }
+
   drawSongSelection() {
     const panel = this.center;
-    const songs = this.songLibrary.songs;
-    const perPage = 5;
-    const pageCount = Math.max(1, Math.ceil(songs.length / perPage));
+    const { ctx, canvas } = panel;
+    const songs = this.selectionSongs();
+    const pageCount = Math.max(1, Math.ceil(songs.length / SONGS_PER_PAGE));
     this.songPage = Math.max(0, Math.min(this.songPage, pageCount - 1));
-    this.background(panel, 'SONG SELECT / 選曲');
-    this.text(panel, '曲と右パネルの難易度を選択 / S・ESCでタイトルへ', 70, 133, 27, MUTED);
-    const first = this.songPage * perPage;
-    for (let index = 0; index < perPage && first + index < songs.length; index++) {
-      const song = songs[first + index];
-      const y = 205 + index * 112;
-      const selected = song.id === this.songLibrary.selectedId;
-      this.button(panel, `song-${song.id}`, '', 70, y, 960, 92, () => this.actions.chooseSong(song.id), { primary: selected });
-      this.wrap(panel, song.title, 95, y + 28, 745, 30, 36, 1, selected ? '#07141f' : INK);
-      this.wrap(panel, `${song.artist || song.title} / ${song.difficulties.length} 難易度${song.bpm ? ` / ${song.bpm.toFixed(1).replace(/\.0$/, '')} BPM` : ''}`, 95, y + 65, 875, 21, 28, 1, selected ? '#193b4c' : MUTED);
-      if (selected) this.text(panel, '選択中', 1005, y + 28, 21, '#193b4c', 'right');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    panel.regions = [];
+    panel.containsPoint = (x, y) => {
+      if (containsPolygon(SONG_LIST_OUTLINE, x, y)) return true;
+      for (const region of panel.regions) if (x >= region.x && x <= region.x + region.width && y >= region.y && y <= region.y + region.height) return true;
+      return false;
+    };
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#19344b');
+    gradient.addColorStop(0.5, '#0d1d31');
+    gradient.addColorStop(1, '#081423');
+    this.selectionPolygon(panel, SONG_LIST_OUTLINE, gradient, '#335873');
+    ctx.fillStyle = CYAN;
+    ctx.fillRect(350, 0, 125, 4);
+    this.text(panel, 'SELECT MUSIC', 355, 53, 31, INK, 'left', 600);
+    this.text(panel, 'FOUR FLOW / MUSIC LIBRARY', 340, 99, 19, CYAN);
+    this.text(panel, songs.length + ' TRACKS  /  4 KEY', 326, 136, 20, MUTED);
+    this.selectionButton(panel, 'songs-refresh', '更新', 914, 33, 136, 42, this.actions.refreshSongs, { size: 21 });
+    this.text(panel, 'SORT BY / 並び替え', 20, 28, 18, MUTED, 'left', 600);
+    for (const [index, mode, label] of [[0, 'title', 'タイトル'], [1, 'difficulty', '難易度'], [2, 'score', 'スコア']]) {
+      const selected = (this.songSort ?? 'title') === mode;
+      const arrow = selected ? this.songSortDescending ? ' ↓' : ' ↑' : '';
+      this.selectionButton(panel, 'sort-' + mode, label + arrow, 20, 54 + index * 58, 215, 46, () => this.setSongSort(mode), { primary: selected, size: 22 });
     }
-    this.button(panel, 'songs-prev', '前へ', 70, 777, 200, 60, () => { this.songPage--; panel.dirty = true; }, { disabled: this.songPage === 0 });
-    this.text(panel, `${this.songPage + 1} / ${pageCount}`, 380, 807, 26, MUTED, 'center');
-    this.button(panel, 'songs-next', '次へ', 490, 777, 200, 60, () => { this.songPage++; panel.dirty = true; }, { disabled: this.songPage >= pageCount - 1 });
-    this.button(panel, 'songs-refresh', '一覧を更新', 720, 777, 310, 60, this.actions.refreshSongs);
-    if (this.game.chart.flashWarning) {
-      const message = this.game.chart.flashWarningText || '点滅演出が含まれます。';
-      this.wrap(panel, '点滅注意：' + message, 70, 855, 960, 21, 27, 1, WARNING);
+    this.text(panel, this.songSort === 'difficulty' ? '最小難易度 ' + (this.songSortDescending ? 'X → E' : 'E → X') : this.songSort === 'score' ? '曲内の最高スコア順' : 'もう一度押すと逆順', 20, 244, 16, MUTED);
+    if (!songs.length) this.text(panel, '曲がありません', 550, 460, 30, MUTED, 'center');
+    const turnPage = amount => {
+      this.songPage += amount;
+      panel.dirty = true;
+      for (const card of this.songCards) card.dirty = true;
+    };
+    this.selectionButton(panel, 'songs-prev', '← 前へ', 90, 814, 150, 48, () => turnPage(-1), { disabled: this.songPage === 0, size: 22 });
+    this.text(panel, (this.songPage + 1) + ' / ' + pageCount, 370, 838, 24, MUTED, 'center');
+    this.selectionButton(panel, 'songs-next', '次へ →', 520, 814, 180, 48, () => turnPage(1), { disabled: this.songPage >= pageCount - 1, size: 22 });
+    this.text(panel, '曲を選び、中央の ▶ で開始', 90, 883, 20, '#a2bed0');
+    this.selectionButton(panel, 'songs-close', 'タイトルに戻る', 70, 906, 280, 42, this.actions.title, { size: 21 });
+    this.selectionButton(panel, 'songs-settings', '設定', 558, 906, 210, 42, this.actions.settings, { size: 21 });
+    panel.texture.needsUpdate = true;
+  }
+
+  drawSelectionStart() {
+    const panel = this.startPanel;
+    const { ctx, canvas } = panel;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    panel.regions = [];
+    const disabled = this.busyVisible || !this.canPlaySelection();
+    const hovered = !disabled && this.isHovered(panel, 'songs-play');
+    const gradient = ctx.createLinearGradient(35, 25, 195, 225);
+    gradient.addColorStop(0, disabled ? '#32455a' : hovered ? '#c4f9ff' : '#86edff');
+    gradient.addColorStop(1, disabled ? '#1c2c40' : '#329ec6');
+    this.selectionPolygon(panel, START_OUTLINE, gradient, disabled ? '#536577' : '#b7f6ff');
+    this.text(panel, this.busyVisible ? '準備中' : this.settings.autoplay ? 'AUTO PLAY' : 'PLAY', 104, 239, 17, disabled ? MUTED : CYAN, 'center', 600);
+    panel.regions.push({ id: 'songs-play', x: 35, y: 25, width: 160, height: 200, disabled, activate: this.actions.startSelected });
+    panel.texture.needsUpdate = true;
+  }
+
+  drawDifficultySelection() {
+    const panel = this.difficultyPanel;
+    const { ctx } = panel;
+    this.selectionBackground(panel, 'DIFFICULTY / 難易度', '#a4b9dc');
+    const song = this.selectedSong();
+    for (let index = 0; index < DIFFICULTIES.length; index++) {
+      const definition = DIFFICULTIES[index];
+      const chart = song?.difficulties.find(item => item.difficulty === definition.code);
+      const selected = Boolean(chart && chart.id === this.songLibrary.selectedDifficultyId);
+      const disabled = this.busyVisible || !chart;
+      const id = 'difficulty-' + definition.code;
+      const hovered = !disabled && this.isHovered(panel, id);
+      const x = 32 + index * 290, y = 64, width = 266, height = 78;
+      this.selectionBox(panel, x, y, width, height, disabled ? '#0b1522' : selected ? '#18394d' : hovered ? '#20324c' : '#122337', disabled ? '#253445' : selected || hovered ? definition.color : '#32465d', 8);
+      ctx.fillStyle = disabled ? '#26384b' : definition.color;
+      ctx.fillRect(x + 12, y + height - 5, selected ? width - 24 : 26, 3);
+      this.text(panel, definition.code, x + 30, y + 35, 37, disabled ? '#536478' : definition.color, 'left', 600);
+      this.text(panel, definition.label, x + 78, y + 25, 18, disabled ? '#536478' : INK, 'left', 600);
+      const detail = !chart ? '未収録' : Number.isFinite(chart.level) ? 'Lv. ' + chart.level : selected ? '選択中' : '選択';
+      this.text(panel, detail, x + 78, y + 54, 20, disabled ? '#536478' : MUTED);
+      if (chart?.flashWarning || selected && this.game.chart.flashWarning) this.text(panel, '!', x + width - 18, y + 26, 22, WARNING, 'right', 600);
+      panel.regions.push({ id, x, y, width, height, disabled, sound: selected ? 'press' : 'change_diff', activate: () => chart && this.actions.chooseDifficulty(chart.id) });
     }
-    const playable = this.canPlaySelection();
-    this.button(panel, 'songs-close', 'タイトルに戻る', 70, 875, 300, 63, this.actions.title);
-    this.button(panel, 'songs-play', this.busy ? '準備中…' : this.settings.autoplay ? 'オートプレイで再生' : 'この曲をプレイ', 400, 875, 630, 63, this.actions.startSelected, { primary: true, disabled: !playable });
     panel.texture.needsUpdate = true;
   }
 
@@ -618,75 +823,61 @@ export class SpatialUI {
     const panel = this.details;
     const song = this.selectedSong();
     const analysis = this.songLibrary.analysis;
-    this.background(panel, 'CHART DETAILS / 譜面詳細', '#ef8bc6');
+    this.selectionBackground(panel, 'TRACK INFORMATION / 楽曲情報', '#a4b9dc');
     if (!song || !analysis) {
       this.text(panel, '曲を選択してください', 48, 150, 32, MUTED);
       panel.texture.needsUpdate = true;
       return;
     }
-    this.wrap(panel, song.title, 48, 114, 904, 32, 42, 2);
-    this.text(panel, 'DIFFICULTY / 難易度', 48, 206, 23, MUTED);
-    if (this.game.chart.flashWarning) {
-      panel.ctx.fillStyle = '#49341b';
-      panel.ctx.fillRect(732, 188, 220, 36);
-      this.text(panel, '点滅注意', 842, 206, 24, WARNING, 'center', 600);
-    }
-    const perPage = 4;
-    const pages = Math.max(1, Math.ceil(song.difficulties.length / perPage));
-    this.difficultyPage = Math.max(0, Math.min(this.difficultyPage, pages - 1));
-    for (let index = 0; index < perPage; index++) {
-      const difficulty = song.difficulties[this.difficultyPage * perPage + index];
-      if (!difficulty) break;
-      const x = index % 2 ? 512 : 48;
-      const y = 244 + Math.floor(index / 2) * 73;
-      const selected = difficulty.id === this.songLibrary.selectedDifficultyId;
-      const flashWarning = selected ? this.game.chart.flashWarning : difficulty.flashWarning;
-      this.button(panel, 'difficulty-' + difficulty.id, '', x, y, 440, 58, () => this.actions.chooseDifficulty(difficulty.id), { primary: selected });
-      const label = (difficulty.level !== null && difficulty.level !== undefined ? 'Lv.' + difficulty.level + '  ' : '') + difficulty.difficulty;
-      this.wrap(panel, label, x + 15, y + 29, flashWarning ? 310 : 410, 23, 29, 1, selected ? '#07141f' : INK);
-      if (flashWarning) this.text(panel, '点滅注意', x + 425, y + 29, 18, selected ? '#4e3009' : WARNING, 'right', 600);
-    }
-    this.button(panel, 'difficulty-prev', '前へ', 48, 390, 180, 44, () => { this.difficultyPage--; panel.dirty = true; }, { disabled: this.difficultyPage === 0 });
-    this.text(panel, `${this.difficultyPage + 1} / ${pages}`, 500, 412, 23, MUTED, 'center');
-    this.button(panel, 'difficulty-next', '次へ', 772, 390, 180, 44, () => { this.difficultyPage++; panel.dirty = true; }, { disabled: this.difficultyPage >= pages - 1 });
-    this.text(panel, analysis.durationSource === 'audio' ? '曲の長さ' : '曲の長さ（譜面長）', 48, 477, 22, MUTED);
-    this.text(panel, formatTime(analysis.duration), 48, 518, 36);
-    this.text(panel, '平均密度 (NPS)', 380, 477, 22, MUTED);
-    this.text(panel, analysis.averageDensity.toFixed(2), 380, 518, 36, CYAN);
-    this.text(panel, 'ピーク密度', 700, 477, 22, MUTED);
-    this.text(panel, analysis.peakDensity.toFixed(2), 700, 518, 36, '#ef8bc6');
-    this.text(panel, '密度の推移（' + analysis.binSeconds + '秒集計）', 48, 562, 22, MUTED);
-    this.text(panel, '■ TAP', 730, 562, 20, CYAN);
-    this.text(panel, '■ LN', 860, 562, 20, '#ef8bc6');
-    this.drawDensityGraph(panel, analysis, 94, 600, 850, 125);
-    this.text(panel, '総ノーツ（TAP＋LN）', 48, 798, 23, MUTED);
-    this.text(panel, analysis.total.toLocaleString(), 48, 839, 38, CYAN);
-    this.text(panel, '総LN', 540, 798, 23, MUTED);
-    this.text(panel, analysis.longNotes.toLocaleString(), 540, 839, 38, '#ef8bc6');
-    this.text(panel, 'LANE', 48, 889, 22, MUTED);
-    this.text(panel, 'TAP', 430, 889, 22, MUTED, 'right');
-    this.text(panel, 'LN', 660, 889, 22, MUTED, 'right');
-    this.text(panel, 'TOTAL', 952, 889, 22, MUTED, 'right');
-    analysis.lanes.forEach((lane, index) => {
-      const y = 935 + index * 40;
-      this.text(panel, `${index + 1}  /  ${CONFIG.keys[index].slice(3)}`, 48, y, 26, CONFIG.colors[index]);
-      this.text(panel, lane.taps.toLocaleString(), 430, y, 26, INK, 'right');
-      this.text(panel, lane.longNotes.toLocaleString(), 660, y, 26, '#ef8bc6', 'right');
-      this.text(panel, lane.total.toLocaleString(), 952, y, 26, CYAN, 'right');
+    const chart = song.difficulties.find(item => item.id === this.songLibrary.selectedDifficultyId);
+    const definition = DIFFICULTIES.find(item => item.code === chart?.difficulty);
+    this.selectionBox(panel, 930, 24, 222, 40, '#15263c', '#344b65', 6);
+    this.text(panel, definition ? definition.code + ' / ' + definition.label : '4 KEY', 1041, 44, 21, definition?.color ?? CYAN, 'center', 600);
+    this.wrap(panel, song.title, 48, 130, 1104, 47, 55, 2);
+    this.wrap(panel, song.artist || '—', 48, 227, 810, 24, 30, 1, MUTED);
+    const metrics = [
+      ['曲の長さ', formatTime(analysis.duration), INK],
+      ['BPM', String(this.game.chart.bpm.toFixed(1)).replace(/\.0$/, ''), INK],
+      ['平均密度 / NPS', analysis.averageDensity.toFixed(2), CYAN],
+      ['ピーク密度 / NPS', analysis.peakDensity.toFixed(2), '#d69bff'],
+    ];
+    metrics.forEach(([label, value, color], index) => {
+      const x = 32 + index * 290;
+      this.selectionBox(panel, x, 264, 266, 70, '#101f32', null, 8);
+      this.text(panel, label, x + 16, 282, 18, MUTED);
+      this.text(panel, value, x + 16, 314, 30, color);
     });
+    this.text(panel, 'NOTE DENSITY / 密度グラフ', 48, 365, 21, '#a2b8d0', 'left', 600);
+    this.text(panel, '■ TAP', 936, 365, 19, CYAN);
+    this.text(panel, '■ LN', 1080, 365, 19, '#ef8bc6');
+    this.drawDensityGraph(panel, analysis, 88, 390, 1064, 130);
+    this.selectionBox(panel, 32, 577, 556, 63, '#102638');
+    this.selectionBox(panel, 612, 577, 556, 63, '#241e34');
+    this.text(panel, '総ノーツ / TAP + LN', 48, 596, 19, MUTED);
+    this.text(panel, analysis.total.toLocaleString(), 572, 618, 32, CYAN, 'right');
+    this.text(panel, '総LN', 628, 596, 19, MUTED);
+    this.text(panel, analysis.longNotes.toLocaleString(), 1152, 618, 32, '#ef8bc6', 'right');
     const best = this.songLibrary.personalBests.get(this.songLibrary.selectedDifficultyId);
-    panel.ctx.fillStyle = '#101d30';
-    panel.ctx.fillRect(32, 1085, 936, 120);
-    this.text(panel, 'PERSONAL BEST / 自己ベスト', 48, 1107, 22, '#ef8bc6');
-    if (!best) this.text(panel, '未プレイ', 952, 1107, 20, MUTED, 'right');
-    this.text(panel, 'スコア', 48, 1143, 20, MUTED);
-    const bestStatus = best && clearStatusForScore(best.score);
-    this.text(panel, best ? best.score.toLocaleString() : '—', 48, 1180, 32, bestStatus?.id === 'highClear' ? bestStatus.color : CYAN);
-    this.text(panel, '精度', 380, 1143, 20, MUTED);
-    this.text(panel, best ? formatAccuracy(best.accuracy, best.bonusAccuracy) : '—', 380, 1180, 26, INK);
-    this.text(panel, '最大コンボ', 700, 1143, 20, MUTED);
-    this.text(panel, best ? best.maxCombo.toLocaleString() : '—', 700, 1180, 32, '#ef8bc6');
-    this.text(panel, '密度はTAP＋LN始点の数 / 秒。LN終点は数えません。', 48, 1225, 18, MUTED);
+    const status = best && clearStatusForScore(best.score);
+    this.selectionBox(panel, 32, 657, 1136, 113, '#14243a', '#3e4160');
+    this.text(panel, 'PERSONAL BEST / 自己ベスト', 48, 679, 20, '#b5a8da', 'left', 600);
+    this.text(panel, best ? status.title : '未プレイ', 1152, 679, 19, status?.color ?? MUTED, 'right', 600);
+    for (const [label, value, x, color] of [
+      ['SCORE', best ? best.score.toLocaleString() : '—', 48, status?.id === 'highClear' ? status.color : CYAN],
+      ['ACCURACY', best ? formatAccuracy(best.accuracy, best.bonusAccuracy) : '—', 450, INK],
+      ['MAX COMBO', best ? best.maxCombo.toLocaleString() : '—', 914, '#d69bff'],
+    ]) {
+      this.text(panel, label, x, 709, 17, MUTED);
+      this.text(panel, value, x, 744, label === 'ACCURACY' ? 25 : 34, color);
+    }
+    analysis.lanes.forEach((lane, index) => {
+      const x = 32 + index * 290;
+      this.selectionBox(panel, x, 796, 266, 94, '#111f31');
+      this.text(panel, (index + 1) + ' / ' + CONFIG.keys[index].slice(3), x + 16, 820, 21, CONFIG.colors[index], 'left', 600);
+      this.text(panel, lane.total.toLocaleString(), x + 250, 820, 25, CONFIG.colors[index], 'right');
+      this.text(panel, 'TAP ' + lane.taps.toLocaleString() + '   LN ' + lane.longNotes.toLocaleString(), x + 16, 859, 18, INK);
+    });
+    this.wrap(panel, this.game.chart.flashWarning ? '点滅注意：' + (this.game.chart.flashWarningText || '点滅演出が含まれます。') : '密度は始点 / 秒。LN終点・フェイク' + (analysis.fakeNotes ?? 0) + '個は含みません。', 48, 915, 1104, 18, 24, 1, this.game.chart.flashWarning ? WARNING : MUTED);
     panel.texture.needsUpdate = true;
   }
 
@@ -831,14 +1022,18 @@ export class SpatialUI {
     this.setPanelVisible(this.center, centerVisible);
     const selectionVisible = !fadingOut && this.songSelectionOpen && !this.settingsOpen;
     this.setPanelVisible(this.details, selectionVisible);
+    if (this.difficultyPanel) this.setPanelVisible(this.difficultyPanel, selectionVisible);
+    if (this.startPanel) this.setPanelVisible(this.startPanel, selectionVisible);
+    for (const card of this.songCards ?? []) this.setPanelVisible(card, selectionVisible && Boolean(this.selectionSongs()[this.songPage * SONGS_PER_PAGE + card.songSlot]));
     this.setPanelVisible(this.left, !fadingOut && !selectionVisible);
     this.setPanelVisible(this.right, !fadingOut && !selectionVisible);
     this.setPanelVisible(this.notice, !fadingOut && Boolean(this.message));
     this.updateSidePanelFocus(now);
     for (const panel of this.panels) this.updatePanelTransition(panel, now);
 
-    const time = Math.max(0, Math.min(songTime, this.game.chart.duration));
-    const progress = time / this.game.chart.duration;
+    const duration = this.game.duration ?? this.game.chart.duration;
+    const time = Math.max(0, Math.min(songTime, duration));
+    const progress = time / duration;
     // バーと点灯は軽い3Dオブジェクトの変更だけで動かし、画像は転送しない。
     this.progressFill.visible = progress > 0;
     this.progressFill.scale.x = progress;
@@ -865,6 +1060,9 @@ export class SpatialUI {
       if (panel === this.left) this.drawTrack(now);
       else if (panel === this.right) this.drawStats();
       else if (panel === this.details) this.drawSongDetails();
+      else if (panel === this.difficultyPanel) this.drawDifficultySelection();
+      else if (panel === this.startPanel) this.drawSelectionStart();
+      else if (panel.songSlot !== undefined) this.drawSongCard(panel);
       else if (panel === this.center) {
         if (this.settingsOpen) this.drawSettings();
         else if (this.songSelectionOpen) this.drawSongSelection();
@@ -879,6 +1077,7 @@ export class SpatialUI {
       break;
     }
     this.finishScreenTransition(now);
+    this.selectionStage?.update(this, now);
   }
 
   makePickResult() {
@@ -888,6 +1087,7 @@ export class SpatialUI {
   pick(origin, direction, result = this.mouseHit) {
     result.panel = result.region = null;
     result.distance = 8;
+    if (this.root?.visible === false) return null;
     for (const panel of this.panels) {
       if (!panel.mesh.visible && !this.panelFocusable(panel)) continue;
       panel.mesh.updateWorldMatrix(true, false);
@@ -926,8 +1126,9 @@ export class SpatialUI {
     } else this.hover.delete(id);
   }
 
-  activate(hit) {
+  activate(hit, { sound = true } = {}) {
     if (!hit?.region || hit.region.disabled || this.busy || !this.panelInteractive(hit.panel)) return;
+    if (sound) this.actions?.playUISound?.(hit.region.sound ?? controlSound(hit.region.id, this.game?.state));
     hit.region.activate(hit);
   }
 
@@ -940,7 +1141,7 @@ export class SpatialUI {
       this.canvas.style.cursor = hit?.region && !hit.region.disabled ? 'pointer' : '';
       const down = this.pointerDown;
       if (down?.id === event.pointerId && down.hit.region?.type === 'slider' && hit?.panel === down.hit.panel) {
-        this.activate({ ...hit, region: down.hit.region });
+        this.activate({ ...hit, region: down.hit.region }, { sound: false });
         event.preventDefault();
       }
     };
@@ -1000,6 +1201,14 @@ export class SpatialUI {
   }
 
   updateXR(frame, referenceSpace, sources) {
+    if (this.inputBlocked) {
+      for (const [source, pointer] of this.xrPointers) {
+        pointer.hit = null;
+        pointer.line.visible = pointer.dot.visible = false;
+        this.setHover(source, null);
+      }
+      return;
+    }
     const pointerFrame = ++this.pointerFrame;
     this.rig.updateWorldMatrix(true, false);
     for (const source of sources) {
@@ -1063,6 +1272,7 @@ export class SpatialUI {
     this.canvas.removeEventListener('lostpointercapture', this.onBlur);
     this.canvas.removeEventListener('pointerleave', this.onPointerLeave);
     window.removeEventListener('blur', this.onBlur);
+    this.selectionStage.dispose();
     this.scene.object3D.remove(this.root);
     for (const panel of this.panels) {
       panel.mesh.traverse(object => {

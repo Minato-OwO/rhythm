@@ -40,7 +40,7 @@ export class TimelineEffects {
     this.colorTracks = Array.from({ length: 4 }, () => []);
     this.events = [];
     for (const event of chart.events ?? []) {
-      if (event.type.startsWith('background')) continue;
+      if (event.type === 'noteSkin' || event.type.startsWith('background')) continue;
       const tint = event.color ? new this.T.Color(event.color) : null;
       if (event.type !== 'laneColor') { this.events.push({ ...event, tint }); continue; }
       for (const lane of event.lanes) {
@@ -49,7 +49,7 @@ export class TimelineEffects {
         const from = previous
           ? previous.from.clone().lerp(previous.to, progress(event.time, previous.time, previous.duration))
           : this.baseColors[lane].clone();
-        track.push({ time: event.time, duration: event.duration, from, to: tint });
+        track.push({ time: event.time, duration: event.duration, from, to: tint ?? this.baseColors[lane] });
       }
     }
     this.reset();

@@ -3,6 +3,7 @@ import { GlyphAtlas } from './glyph-text.js';
 import { LaneEffects } from './lane-effects.js';
 import { ScrollTrack, SpeedTrack, ScrollNoteIndex } from './scroll-track.js';
 import { LaneGauges } from './lane-gauges.js';
+import { NoteSkins } from './note-skins.js';
 
 export class StageView {
   constructor(scene, settings) {
@@ -23,11 +24,12 @@ export class StageView {
     this.pool = [];
     this.pressed = [false, false, false, false];
     this.flashes = [0, 0, 0, 0];
-    this.materials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color }));
+    this.materials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color, fog: false }));
     this.noteGeometry = new T.BoxGeometry(CONFIG.laneWidth - 0.025, 0.045, 0.105);
     this.holdGeometry = new T.BoxGeometry(1, 1, 1);
-    this.holdMaterials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.92, depthWrite: false }));
-    this.activeHoldMaterials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color }));
+    this.holdMaterials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color, transparent: true, opacity: 0.92, depthWrite: false, fog: false }));
+    this.activeHoldMaterials = CONFIG.colors.map(color => new T.MeshBasicMaterial({ color, fog: false }));
+    this.noteSkins = new NoteSkins(this);
     this.scrollBounds = { min: 0, max: 0 };
     this.drawIndexedNote = indexed => this.drawNote(indexed.entry);
     this.pads = [];
@@ -179,6 +181,7 @@ export class StageView {
     this.materials[lane].color.copy(color);
     this.holdMaterials[lane].color.copy(color);
     this.activeHoldMaterials[lane].color.copy(color);
+    this.noteSkins?.setLaneColor(lane, color);
     for (const mesh of this.laneAccents[lane]) mesh.material.color.copy(color);
     this.effects.setLaneColor(lane, color);
   }
@@ -273,6 +276,7 @@ export class StageView {
     group.tail.scale.set(1, 0.75, 1);
     group.body = new T.Mesh(this.holdGeometry, this.holdMaterials[lane]);
     group.add(group.body, group.tail, group.head);
+    this.noteSkins?.applyTo(group, lane);
     this.laneRoot.add(group);
     return group;
   }
@@ -285,10 +289,12 @@ export class StageView {
       mesh = this.pool.pop() ?? this.makeNote(note.lane);
       mesh.visible = true;
       mesh.head.material = mesh.tail.material = this.materials[note.lane];
+      this.noteSkins?.applyTo(mesh, note.lane);
       this.noteMeshes.set(note.id, mesh);
     }
     mesh.userData.noteId = note.id;
     mesh.userData.noteFrame = this.noteFrame;
+    mesh.userData.holdActive = Boolean(note.started);
     mesh.position.x = laneX(note.lane);
     const rate = this.scrollRate * this.speedMultiplier * (note.scrollMultiplier ?? 1);
     const headDistance = note.started ? 0 : (entry.position - this.scrollPosition) * rate;
@@ -306,12 +312,13 @@ export class StageView {
     const near = Math.max(-0.6, Math.min(a, b));
     const far = Math.min(CONFIG.laneDepth, Math.max(a, b));
     mesh.body.visible = far > near;
-    mesh.body.material = note.started ? this.activeHoldMaterials[note.lane] : this.holdMaterials[note.lane];
+    mesh.body.material = this.noteSkins?.holdMaterial(note.lane, note.started) ?? (note.started ? this.activeHoldMaterials[note.lane] : this.holdMaterials[note.lane]);
     mesh.body.position.set(0, CONFIG.hitPlaneY - 0.012, CONFIG.hitZ - (near + far) / 2);
     mesh.body.scale.set(CONFIG.laneWidth - 0.025, 0.03, Math.max(0.001, far - near));
   }
 
   disposeNotes() {
+    this.noteSkins?.dispose();
     this.noteGeometry.dispose(); this.holdGeometry.dispose();
     for (const material of [...this.materials, ...this.holdMaterials, ...this.activeHoldMaterials]) material.dispose();
   }
@@ -320,7 +327,7 @@ export class StageView {
     // 開始カウントダウンから表示し、ポーズ中とエディタの停止プレビューでも維持する。
     this.laneRoot.visible = game.state === 'playing' || game.state === 'paused';
     const time = songTime;
-    this.gauges.update(game.score ?? 0, time, game.chart.duration);
+    this.gauges.update(game.score ?? 0, time, game.duration ?? game.chart.duration);
     this.prepareNotes(game);
     this.displayTime = time;
     this.scrollPosition = this.scrollTrack.positionAt(time);
@@ -344,7 +351,8 @@ export class StageView {
       this.pads[lane].material.opacity = this.pressed[lane] || game.held?.(lane) ? 0.95 : 0.28 + pulse * 0.6;
     }
     this.effects.update(now, this.pressed, this.flashes);
-    const countdown = game.state === 'playing' && time < 0 ? `READY ${Math.ceil(-time)}` : '';
+    const remaining = game.countdownRemainingAt?.(time) ?? Math.max(0, -time);
+    const countdown = game.state === 'playing' && !game.countdownPending && remaining > 0 ? `READY ${Math.min(CONFIG.countInSeconds, Math.ceil(remaining))}` : '';
     if (countdown) {
       if (countdown !== this.countdownLabel) this.drawJudgement(countdown, '#9aeeff');
       this.countdownLabel = countdown;
@@ -355,7 +363,7 @@ export class StageView {
     }
     if (this.countdownLabel) { this.countdownLabel = ''; this.lastJudgement = -Infinity; }
     const elapsed = now - this.lastJudgement;
-    this.judgement.mesh.visible = elapsed < 650;
+    this.judgement.mesh.visible = !game.countdownPending && elapsed < 650;
     const opacity = Math.max(0, 1 - elapsed / 650);
     this.judgementLabel.setOpacity(opacity);
     this.judgementTiming.setOpacity(opacity);

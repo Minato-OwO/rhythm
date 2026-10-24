@@ -317,7 +317,7 @@ export class AudioTransport {
       const note = this.chart.notes[this.noteCursor];
       const scheduled = this.anchor + note.time;
       if (scheduled >= horizon) break;
-      if (scheduled >= this.now - 0.025) {
+      if (!note.fake && scheduled >= this.now - 0.025) {
         this.tone([261.626, 329.628, 391.995, 523.251][note.lane], Math.max(this.now, scheduled), 0.17, 0.065, 'triangle');
       }
       this.noteCursor++;

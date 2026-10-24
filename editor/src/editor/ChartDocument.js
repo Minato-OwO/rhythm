@@ -2,6 +2,7 @@ import { normalizeChart, isRangeSV } from '../../../src/chart.js';
 export { isRangeSV };
 
 export const EFFECTS = {
+  noteSkin: { label: 'ノーツスキン変更', color: '#77e8b0', defaults: { durationSeconds: 0, target: 'head', src: null, tint: false } },
   lanePulse: { label: 'レーン発光', color: '#43ddff', defaults: { durationSeconds: 0.4, intensity: 0.6 } },
   laneColor: { label: 'レーン色変更', color: '#c881ff', defaults: { durationSeconds: 0.4, color: '#c881ff' } },
   screenFlash: { label: '画面フラッシュ', color: '#ffca73', defaults: { durationSeconds: 0.4, intensity: 0.25, color: '#ffffff' } },
@@ -20,6 +21,7 @@ export class ChartDocument {
   constructor(source = { version: 1, title: 'New Song', artist: '', bpm: 120, audio: './audio.ogg', offsetSeconds: 0, durationSeconds: 60, notes: [], events: [] }) {
     normalizeChart(source, { allowEmptyNotes: true });
     this.metadata = clone(source);
+    this.metadata.difficulty ??= 'N';
     delete this.metadata.notes;
     delete this.metadata.events;
     delete this.metadata.scrollVelocities;
@@ -39,7 +41,7 @@ export class ChartDocument {
   beat(time) { return (time - (this.metadata.offsetSeconds ?? 0)) * this.metadata.bpm / 60; }
   seconds(beat) { return beat * 60 / this.metadata.bpm + (this.metadata.offsetSeconds ?? 0); }
   endTime(item) { return item.kind === 'sv' ? this.time(item) + this.duration(item) : item.data.endTimeSeconds ?? (item.data.endBeat !== undefined ? this.seconds(item.data.endBeat) : this.time(item)); }
-  duration(item) { return item.kind === 'sv' ? isRangeSV(item.data) ? item.data.durationSeconds ?? (item.data.durationBeats ?? 0) * 60 / this.metadata.bpm : 0 : item.kind === 'note' ? this.endTime(item) - this.time(item) : item.data.durationSeconds ?? EFFECTS[item.data.type].defaults.durationSeconds; }
+  duration(item) { return item.kind === 'event' && item.data.type === 'noteSkin' ? 0 : item.kind === 'sv' ? isRangeSV(item.data) ? item.data.durationSeconds ?? (item.data.durationBeats ?? 0) * 60 / this.metadata.bpm : 0 : item.kind === 'note' ? this.endTime(item) - this.time(item) : item.data.durationSeconds ?? EFFECTS[item.data.type].defaults.durationSeconds; }
   setSVDuration(item, seconds) {
     item.data.mode = 'range';
     if (item.data.durationSeconds !== undefined) {
@@ -98,6 +100,7 @@ export class ChartDocument {
   remember(snapshot) { this.past.push(snapshot); if (this.past.length > 100) this.past.shift(); this.future.length = 0; }
   beginEdit() { this.pending = this.snapshot(); }
   endEdit() { if (this.pending && this.pending !== this.snapshot()) this.remember(this.pending); this.pending = null; }
+  cancelEdit() { if (this.pending) this.restore(this.pending); this.pending = null; }
 
   change(edit, record = true) {
     const before = this.snapshot();
@@ -120,25 +123,64 @@ export class ChartDocument {
     return id;
   }
 
-  remove(id) { this.change(() => { this.notes = this.notes.filter(item => item.id !== id); this.events = this.events.filter(item => item.id !== id); this.svs = this.svs.filter(item => item.id !== id); }); }
-  duplicate(id, step) {
-    const original = this.get(id);
-    if (!original) return null;
-    let result;
+  movementOrigins(ids) {
+    const items = new Map(this.items.map(item => [item.id, item]));
+    return [...new Set(ids)].map(id => items.get(id)).filter(Boolean).map(item => ({ id: item.id, time: this.time(item), lane: item.kind === 'note' ? item.data.lane : null }));
+  }
+  moveItems(origins, seconds, lanes = 0, record = true) {
+    if (!Number.isFinite(seconds) || !Number.isInteger(lanes)) throw new Error('移動量には有限の数値を指定してください。');
+    const items = new Map(this.items.map(item => [item.id, item]));
+    const existing = origins.filter(origin => items.has(origin.id));
+    if (!existing.length) return;
+    let earliest = Infinity, minLane = 3, maxLane = 0, hasNotes = false;
+    for (const origin of existing) {
+      earliest = Math.min(earliest, origin.time);
+      if (origin.lane !== null) { hasNotes = true; minLane = Math.min(minLane, origin.lane); maxLane = Math.max(maxLane, origin.lane); }
+    }
+    // 先頭や外側のレーンでグループ全体を止め、相対位置を崩さない。
+    seconds = Math.max(-earliest, seconds);
+    lanes = hasNotes ? Math.max(-minLane, Math.min(3 - maxLane, lanes)) : 0;
     this.change(() => {
-      const copy = clone(original);
-      copy.id = `item-${this.nextId++}`;
-      this.setTime(copy, this.time(original) + step);
-      this[collection(copy.kind)].push(copy);
-      result = copy.id;
+      for (const origin of existing) {
+        const item = items.get(origin.id);
+        this.setTime(item, origin.time + seconds);
+        if (origin.lane !== null) item.data.lane = origin.lane + lanes;
+      }
+    }, record);
+  }
+  moveMany(ids, seconds, lanes = 0) { this.moveItems(this.movementOrigins(ids), seconds, lanes); }
+  removeMany(ids) {
+    const selected = new Set(ids);
+    this.change(() => {
+      this.notes = this.notes.filter(item => !selected.has(item.id));
+      this.events = this.events.filter(item => !selected.has(item.id));
+      this.svs = this.svs.filter(item => !selected.has(item.id));
+    });
+  }
+  remove(id) { this.removeMany([id]); }
+  duplicateMany(ids, step) {
+    if (!Number.isFinite(step)) throw new Error('複製の移動量には有限の数値を指定してください。');
+    const items = new Map(this.items.map(item => [item.id, item]));
+    const originals = [...new Set(ids)].map(id => items.get(id)).filter(Boolean);
+    if (!originals.length) return [];
+    const result = [];
+    this.change(() => {
+      for (const original of originals) {
+        const copy = clone(original);
+        copy.id = `item-${this.nextId++}`;
+        this.setTime(copy, this.time(original) + step);
+        this[collection(copy.kind)].push(copy);
+        result.push(copy.id);
+      }
     });
     return result;
   }
+  duplicate(id, step) { return this.duplicateMany([id], step)[0] ?? null; }
   undo() { if (!this.past.length) return; this.future.push(this.snapshot()); this.restore(this.past.pop()); }
   redo() { if (!this.future.length) return; this.past.push(this.snapshot()); this.restore(this.future.pop()); }
 
   fitFade(item) {
-    if (item.kind !== 'event') return;
+    if (item.kind !== 'event' || item.data.type === 'noteSkin') return;
     const duration = this.duration(item);
     const soft = ['screenFade', 'backgroundStars', 'backgroundGLB', 'backgroundScene'].includes(item.data.type);
     const defaults = soft ? Math.min(item.data.type === 'screenFade' ? 0.25 : 0.5, duration / 2) : 0;

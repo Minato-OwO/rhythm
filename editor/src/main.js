@@ -4,7 +4,10 @@ import { loadSongCatalog } from '../../src/song-library.js';
 import { Timeline } from './editor/Timeline.js';
 import { PreviewEngine } from './editor/PreviewEngine.js';
 import { importOsuFiles } from './editor/OsuProject.js';
-import { readDirectory, readFiles, droppedFiles, readServerSong, saveDirectory, downloadJSON, assetPath, assetURLPath } from './editor/ProjectFiles.js';
+import { readDirectory, readFiles, droppedFiles, readServerSong, saveDirectory, downloadJSON, assetPath, assetURLPath, embeddedSkin, embedSkinImages } from './editor/ProjectFiles.js';
+import { pickSkinFile, readSkinFile } from '../../src/note-skins.js';
+import { NOTE_KINDS, createNoteData, getNoteKind, setNoteKind } from './editor/NoteTypes.js';
+import { DIFFICULTIES, difficultyFilename } from '../../src/difficulties.js';
 
 const $ = id => document.getElementById(id);
 // 演出の定義と追加メニューを揃え、新しい種類の載せ忘れを防ぐ。
@@ -12,14 +15,21 @@ const effectType = $('effect-type');
 const initialEffectType = effectType.value;
 effectType.replaceChildren(...Object.entries(EFFECTS).map(([type, spec]) => new Option(spec.label, type)));
 if (Object.hasOwn(EFFECTS, initialEffectType)) effectType.value = initialEffectType;
+const noteKindControl = $('note-kind');
+const initialNoteKind = noteKindControl.value;
+noteKindControl.replaceChildren(...NOTE_KINDS.map(([value, label]) => new Option(label, value)));
+if (NOTE_KINDS.some(([value]) => value === initialNoteKind)) noteKindControl.value = initialNoteKind;
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 const KEYS = ['D', 'F', 'J', 'K'];
 let doc = new ChartDocument();
 let selected = null;
+let selectedIds = new Set();
+let bulkMoveAmount = 1;
+let bulkMoveUnit = 'beat';
 let currentTime = 0;
 let editorScrollTrack = new ScrollTrack();
 let editorSpeedTrack = new SpeedTrack();
-let project = { directory: null, audio: null, audioDirty: false, models: new Map(), label: '新規曲' };
+let project = { directory: null, audio: null, audioDirty: false, models: new Map(), skins: new Map(), label: '新規曲' };
 let songs = [];
 let busy = false;
 let previewFrame = null;
@@ -31,11 +41,12 @@ const timeline = new Timeline({
   snapTime,
   onSeek: seconds => { engine.seekTo(seconds * 1000).catch(showError); },
   onSelect: select,
+  onSelectMany: selectMany,
   onAdd: (kind, seconds, target) => addItem(kind, seconds, target, true),
   onChange: full => changed(full),
   onError: showError,
   onContext: (id, x, y) => {
-    select(id);
+    select(id, { preserve: true });
     const menu = $('context-menu');
     menu.hidden = false;
     menu.style.left = Math.min(x, innerWidth - 160) + 'px';
@@ -92,6 +103,7 @@ function flushPreview() {
   if (previewFrame) { cancelAnimationFrame(previewFrame); previewFrame = null; }
   engine.offsetSeconds = doc.metadata.offsetSeconds ?? 0;
   engine.setModelAssets(project.models);
+  engine.setSkinAssets(project.skins);
   const chart = doc.normalized();
   engine.loadChart(chart);
   editorScrollTrack = new ScrollTrack(chart.scrollVelocities);
@@ -99,14 +111,17 @@ function flushPreview() {
   updateSVReadout();
 }
 function changed(full = true) {
-  if (selected && !doc.get(selected)) selected = null;
-  $('dirty-indicator').textContent = doc.dirty || project.audioDirty || [...project.models.values()].some(asset => asset.dirty) ? '未保存' : '';
+  const existingIds = new Set(doc.items.map(item => item.id));
+  selectedIds = new Set([...selectedIds].filter(id => existingIds.has(id)));
+  if (!selectedIds.has(selected)) selected = [...selectedIds].at(-1) ?? null;
+  $('dirty-indicator').textContent = doc.dirty || project.audioDirty || [...project.models.values(), ...project.skins.values()].some(asset => asset.dirty) ? '未保存' : '';
   $('btn-undo').disabled = !doc.past.length;
   $('btn-redo').disabled = !doc.future.length;
   $('bpm-display').textContent = 'BPM ' + doc.metadata.bpm;
   $('offset-display').textContent = 'OFFSET ' + (doc.metadata.offsetSeconds ?? 0) + 's';
-  $('event-count').textContent = doc.events.length + '演出 / ' + doc.notes.length + 'ノーツ / ' + doc.svs.length + 'SV';
-  timeline.selected = selected;
+  const fakeCount = doc.notes.filter(item => item.data.fake).length;
+  $('event-count').textContent = doc.events.length + '演出 / ' + (doc.notes.length - fakeCount) + 'ノーツ' + (fakeCount ? '＋' + fakeCount + 'フェイク' : '') + ' / ' + doc.svs.length + 'SV';
+  timeline.selection(selectedIds, selected);
   if (full) { renderSong(); renderProperties(); renderEventList(); timeline.render(); }
   syncPreview();
 }
@@ -115,31 +130,56 @@ function edit(action, full = true) {
   try { doc.change(action); changed(full); status('編集中 / ' + doc.notes.length + 'ノーツ・' + doc.events.length + '演出'); }
   catch (error) { showError(error); renderProperties(); renderSong(); }
 }
-function select(id) {
-  selected = id;
-  timeline.selection(id);
-  for (const row of $('event-list').children) row.classList.toggle('selected', row.dataset.id === id);
+function selectMany(ids, primary = null) {
+  const existingIds = new Set(doc.items.map(item => item.id));
+  selectedIds = new Set([...ids].filter(id => existingIds.has(id)));
+  selected = selectedIds.has(primary) ? primary : [...selectedIds].at(-1) ?? null;
+  timeline.selection(selectedIds, selected);
+  for (const row of $('event-list').children) row.classList.toggle('selected', selectedIds.has(row.dataset.id));
   renderProperties();
+}
+function select(id, { toggle = false, preserve = false } = {}) {
+  if (toggle) {
+    const ids = new Set(selectedIds);
+    if (ids.has(id)) ids.delete(id); else ids.add(id);
+    selectMany(ids, id);
+  } else selectMany(preserve && selectedIds.has(id) ? selectedIds : id ? [id] : [], id);
 }
 function addItem(kind, seconds, laneOrType, snapped = false) {
   if (busy) return;
   try {
     const firstModel = project.models.keys().next().value;
+    const firstSkin = project.skins.keys().next().value;
     const at = snapped ? seconds : snapTime(seconds);
     const overrides = kind === 'event' && laneOrType === 'backgroundGLB' && firstModel ? { src: assetURLPath(firstModel) }
-      : kind === 'note' && $('note-kind').value === 'hold' ? { endBeat: Number((doc.beat(at) + 1).toFixed(9)) } : {};
+      : kind === 'event' && laneOrType === 'noteSkin' && firstSkin ? { src: assetURLPath(firstSkin) }
+      : kind === 'note' ? createNoteData(doc, at, $('note-kind').value) : {};
     selected = doc.add(kind, at, laneOrType, overrides);
+    selectedIds = new Set([selected]);
     $('drop-zone').classList.add('hidden'); changed(); status(kind === 'note' ? 'ノーツを追加しました。' : '演出を追加しました。');
   }
   catch (error) { showError(error); }
 }
 function removeSelection() {
-  if (busy || !selected) return;
-  try { doc.remove(selected); selected = null; changed(); } catch (error) { showError(error); }
+  if (busy || timeline.dragging || !selectedIds.size) return;
+  try { doc.removeMany(selectedIds); selected = null; selectedIds.clear(); changed(); } catch (error) { showError(error); }
 }
 function duplicateSelection() {
-  if (busy || !selected) return;
-  try { selected = doc.duplicate(selected, snapStep()); changed(); } catch (error) { showError(error); }
+  if (busy || timeline.dragging || !selectedIds.size) return;
+  try {
+    const items = doc.items.filter(item => selectedIds.has(item.id));
+    let start = Infinity, end = 0;
+    for (const item of items) { start = Math.min(start, doc.time(item)); end = Math.max(end, doc.time(item) + doc.duration(item)); }
+    const step = items.length > 1 ? end - start + snapStep() : snapStep();
+    const ids = doc.duplicateMany(selectedIds, step);
+    selectMany(ids);
+    changed();
+  } catch (error) { showError(error); }
+}
+function moveSelection(seconds) {
+  if (busy || timeline.dragging || !selectedIds.size) return;
+  try { doc.moveMany(selectedIds, seconds); changed(); }
+  catch (error) { showError(error); }
 }
 
 function field(label, key, value, { type = 'number', step = '0.001', min, max, readonly = false } = {}) {
@@ -152,21 +192,72 @@ function vectorField(label, key, data, fallback, options = {}) {
 function checkField(label, key, checked) {
   return '<label class="editor-check"><input type="checkbox" data-key="' + key + '"' + (checked ? ' checked' : '') + ' />' + escape(label) + '</label>';
 }
+function skinSelect(label, attribute, src) {
+  const embedded = embeddedSkin(src);
+  const current = src && !embedded ? assetPath(src) : null;
+  const paths = new Set(project.skins.keys());
+  if (current) paths.add(current);
+  return '<label class="editor-field"><span>' + escape(label) + '</span><select ' + attribute + '>'
+    + '<option value=""' + (!src ? ' selected' : '') + '>標準スキン</option>'
+    + (embedded ? '<option value="__embedded__" selected>埋め込み画像</option>' : '')
+    + [...paths].sort().map(path => '<option value="' + escape(assetURLPath(path)) + '"' + (path === current ? ' selected' : '') + '>' + escape(path) + '</option>').join('') + '</select></label>';
+}
+function chooseSkin(slot = null) {
+  if (busy || timeline.dragging) return;
+  const targetId = doc.get(selected)?.data.type === 'noteSkin' ? selected : null;
+  const picked = pickSkinFile();
+  run(async () => {
+    const file = await picked;
+    if (!file) return;
+    const image = await readSkinFile(file);
+    const blob = await (await fetch(image.dataUrl)).blob();
+    let name = file.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+    if (blob.type === 'image/png' && !/\.png$/i.test(name)) name = name.replace(/\.[^.]+$/, '') + '.png';
+    const stem = name.replace(/\.[^.]+$/, ''), extension = name.slice(stem.length);
+    let path = 'skins/' + name;
+    for (let suffix = 2; project.skins.has(path); suffix++) path = 'skins/' + stem + '-' + suffix + extension;
+    project.skins.set(path, { file: new File([blob], path.split('/').at(-1), { type: blob.type }), dirty: true });
+    doc.change(() => {
+      if (slot) doc.metadata.noteSkins = { ...doc.metadata.noteSkins, [slot]: assetURLPath(path) };
+      else if (targetId && doc.get(targetId)) doc.get(targetId).data.src = assetURLPath(path);
+    });
+    changed();
+    status('スキン画像を追加しました。フォルダ保存時に画像も保存します。');
+  });
+}
 function renderSong() {
   $('song-properties').innerHTML =
     field('曲名', 'title', doc.metadata.title, { type: 'text' }) +
+    '<label class="editor-field"><span>難易度</span><select data-chart-difficulty>' + DIFFICULTIES.map(item => '<option value="' + item.code + '"' + (doc.metadata.difficulty === item.code ? ' selected' : '') + '>' + item.code + ' / ' + item.label + '</option>').join('') + '</select></label>' +
     field('作曲者', 'artist', doc.metadata.artist, { type: 'text' }) +
     field('BPM', 'bpm', doc.metadata.bpm, { min: 1, step: '0.001' }) +
     field('オフセット（秒）', 'offsetSeconds', doc.metadata.offsetSeconds ?? 0) +
     field('終了時刻（秒）', 'durationSeconds', doc.metadata.durationSeconds ?? doc.normalized().duration, { min: 1 }) +
     field('音声', 'audio', doc.metadata.audio ?? doc.metadata.audioUrl ?? '', { type: 'text', readonly: true }) +
     checkField('選曲画面に「点滅注意」を表示', 'flashWarning', doc.metadata.flashWarning === true) +
-    field('点滅注意の補足（任意）', 'flashWarningText', doc.metadata.flashWarningText ?? '', { type: 'text' });
+    field('点滅注意の補足（任意）', 'flashWarningText', doc.metadata.flashWarningText ?? '', { type: 'text' })
+    + '<h3 class="property-title">ノーツスキン（譜面全体）</h3>'
+    + skinSelect('通常ノーツ・LN始点／終点', 'data-skin="head"', doc.metadata.noteSkins?.head)
+    + '<button id="choose-default-skin-head">ノーツ画像を選ぶ</button>'
+    + skinSelect('LNの帯', 'data-skin="body"', doc.metadata.noteSkins?.body)
+    + '<button id="choose-default-skin-body">LNの帯画像を選ぶ</button>'
+    + checkField('スキン画像をレーン色で着色', 'skinTint', doc.metadata.noteSkins?.tint ?? false)
+    + '<p class="editor-help">透過画像に対応。曲中の切替は「＋演出 → ノーツスキン変更」。</p>';
   for (const input of $('song-properties').querySelectorAll('input:not([readonly])')) input.addEventListener('change', () => {
     const value = input.type === 'checkbox' ? input.checked : input.type === 'number' ? input.value === '' ? NaN : Number(input.value) : input.value;
     if (input.type === 'number' && !Number.isFinite(value)) return showError(new Error('数値を入力してください。'));
-    edit(() => { doc.metadata[input.dataset.key] = value; });
+    edit(() => {
+      if (input.dataset.key === 'skinTint') doc.metadata.noteSkins = { ...doc.metadata.noteSkins, tint: value };
+      else doc.metadata[input.dataset.key] = value;
+    });
   });
+  for (const input of $('song-properties').querySelectorAll('[data-skin]')) input.onchange = () => {
+    if (input.value === '__embedded__') return;
+    edit(() => { doc.metadata.noteSkins = { ...doc.metadata.noteSkins, [input.dataset.skin]: input.value || null }; });
+  };
+  $('choose-default-skin-head').onclick = () => chooseSkin('head');
+  $('choose-default-skin-body').onclick = () => chooseSkin('body');
+  $('song-properties').querySelector('[data-chart-difficulty]').onchange = event => edit(() => { doc.metadata.difficulty = event.target.value; });
 }
 function renderEventList() {
   const list = $('event-list');
@@ -174,22 +265,55 @@ function renderEventList() {
   for (const item of [...doc.events].sort((a, b) => doc.time(a) - doc.time(b))) {
     const li = document.createElement('li');
     li.dataset.id = item.id;
-    li.classList.toggle('selected', item.id === selected);
+    li.classList.toggle('selected', selectedIds.has(item.id));
     const dot = document.createElement('span');
     dot.className = 'event-dot';
     dot.style.background = EFFECTS[item.data.type].color;
     const text = document.createElement('span');
     text.textContent = EFFECTS[item.data.type].label + ' / ' + doc.time(item).toFixed(3) + 's';
     li.append(dot, text);
-    li.addEventListener('click', () => select(item.id));
+    li.addEventListener('click', event => select(item.id, { toggle: event.ctrlKey || event.metaKey }));
     li.addEventListener('dblclick', () => { engine.seekTo(doc.time(item) * 1000).catch(showError); });
     list.append(li);
   }
 }
 function renderProperties() {
+  if (selectedIds.size > 1) {
+    const items = doc.items.filter(item => selectedIds.has(item.id));
+    const count = kind => items.filter(item => item.kind === kind).length;
+    $('properties-content').innerHTML = '<h3 class="property-title">' + items.length + '項目を選択中</h3>'
+      + '<p class="editor-help">ノーツ ' + count('note') + ' / SV ' + count('sv') + ' / 演出 ' + count('event') + '</p>'
+      + '<p class="editor-help">選択したブロックをドラッグすると、間隔と長さを保って一括移動します。Ctrl＋クリックで選択を追加・解除できます。</p>'
+      + '<label class="editor-field"><span>移動量の単位</span><select id="bulk-move-unit"><option value="beat">拍</option><option value="seconds">秒</option></select></label>'
+      + '<label class="editor-field"><span>移動量</span><input id="bulk-move-amount" type="number" min="0" /></label>'
+      + '<div class="property-actions"><button id="bulk-move-before">前の時刻へ</button><button id="bulk-move-after">後の時刻へ</button></div>'
+      + '<p class="editor-help">Ctrl＋← / →でもスナップ間隔で一括移動できます。Escapeで選択解除。</p>'
+      + '<div class="property-actions"><button id="btn-prop-duplicate">まとめて複製</button><button id="btn-prop-delete" class="btn-danger">まとめて削除</button></div>';
+    const move = direction => {
+      const input = $('bulk-move-amount');
+      const amount = input.value === '' ? NaN : Number(input.value);
+      if (!Number.isFinite(amount) || amount < 0) return showError(new Error('移動量には0以上の数値を入力してください。'));
+      bulkMoveAmount = amount;
+      bulkMoveUnit = $('bulk-move-unit').value;
+      const seconds = amount * (bulkMoveUnit === 'beat' ? 60 / doc.metadata.bpm : 1);
+      moveSelection(direction * seconds);
+    };
+    $('bulk-move-unit').value = bulkMoveUnit;
+    $('bulk-move-amount').value = bulkMoveAmount;
+    $('bulk-move-amount').step = bulkMoveUnit === 'beat' ? '0.125' : '0.001';
+    $('bulk-move-unit').onchange = event => {
+      bulkMoveUnit = event.target.value;
+      $('bulk-move-amount').step = bulkMoveUnit === 'beat' ? '0.125' : '0.001';
+    };
+    $('bulk-move-before').onclick = () => move(-1);
+    $('bulk-move-after').onclick = () => move(1);
+    $('btn-prop-duplicate').onclick = duplicateSelection;
+    $('btn-prop-delete').onclick = removeSelection;
+    return;
+  }
   const item = doc.get(selected);
   if (!item) {
-    $('properties-content').innerHTML = '<div class="no-selection">ノーツ・演出を選択してください。</div><p class="editor-help">タイムラインをダブルクリックして追加できます。D / F / J / Kでも再生位置にノーツを置けます。</p>';
+    $('properties-content').innerHTML = '<div class="no-selection">ノーツ・演出を選択してください。</div><p class="editor-help">Ctrl＋ドラッグで範囲選択できます。タイムラインをダブルクリックして追加、D / F / J / Kでも再生位置にノーツを置けます。</p>';
     return;
   }
   const data = item.data;
@@ -222,13 +346,22 @@ function renderProperties() {
     html += field('個別SV倍率', 'scrollMultiplier', data.scrollMultiplier ?? 1, { min: -SV_MULTIPLIER_LIMIT, max: SV_MULTIPLIER_LIMIT, step: '0.01' });
     html += '<p class="editor-help">全体SVにこのノーツの倍率を掛けます。1で全体SVと同じ、0.5で半速、2で倍速。0は通常の接近時間から判定線上に固定、負数は移動方向を反転します。音源・判定時刻は変わりません。</p>';
     const hold = doc.duration(item) > 0;
-    html += '<label class="editor-field"><span>種類</span><select data-key="noteType"><option value="tap"' + (!hold ? ' selected' : '') + '>タップ</option><option value="hold"' + (hold ? ' selected' : '') + '>LN</option></select></label>';
+    const noteKind = getNoteKind(doc, item);
+    html += '<label class="editor-field"><span>種類</span><select data-key="noteType">' + NOTE_KINDS.map(([value, label]) => '<option value="' + value + '"' + (noteKind === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>';
+    if (data.fake) html += '<p class="editor-help">フェイク：判定・ミス・スコア・コンボ・ヒット音の対象外です。個別SV・全体SV・speedとスキンは通常ノーツと共通です。</p>';
     if (hold) {
       const endSeconds = data.endTimeSeconds !== undefined;
       html += field(endSeconds ? '終点（秒）' : '終点（拍）', 'endStamp', endSeconds ? data.endTimeSeconds : data.endBeat, { step: endSeconds ? '0.001' : '0.125' });
       html += '<p class="editor-help">長さ ' + doc.duration(item).toFixed(3) + '秒。タイムラインの両端でも調整できます。</p>';
       html += '<p class="editor-help">個別SVはLNの始点・胴・終点すべてに適用します。</p>';
     }
+  } else if (data.type === 'noteSkin') {
+    html += '<label class="editor-field"><span>変更する部分</span><select data-key="target">'
+      + [['head', '通常ノーツ・LN始点／終点'], ['body', 'LNの帯'], ['all', '両方']].map(([value, label]) => '<option value="' + value + '"' + ((data.target ?? 'head') === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select></label>';
+    html += skinSelect('スキン画像', 'data-key="src"', data.src);
+    html += '<button id="btn-prop-skin">画像を選ぶ・追加</button>';
+    html += checkField('画像をレーン色で着色', 'tint', data.tint ?? false);
+    html += '<p class="editor-help">指定時刻で切り替え、次の同じ部分の変更まで保持します。「標準スキン」で元の形へ戻します。透過PNG・WebPなどを使用できます。</p>';
   } else {
     html += field(data.type === 'backgroundStage' ? '変化にかける時間（秒）' : '長さ（秒）', 'durationSeconds', doc.duration(item), { min: ['laneColor', 'backgroundColor', 'backgroundStage'].includes(data.type) ? 0 : 0.01 });
     if (data.type === 'backgroundStage') {
@@ -244,7 +377,11 @@ function renderProperties() {
     }
     if (!['laneColor', 'backgroundColor', 'backgroundStage'].includes(data.type)) html += field('強さ（0〜1）', 'intensity', data.intensity ?? EFFECTS[data.type].defaults.intensity ?? 0.6, { min: 0, max: 1, step: '0.05' });
     if (['lanePulse', 'backgroundStage'].includes(data.type)) html += checkField(data.type === 'backgroundStage' ? '元の色を使用する' : 'レーンの色を使用する', 'inheritColor', !data.color);
-    if (!['lanePulse', 'backgroundStage'].includes(data.type) || data.color) html += field('色', 'color', data.color ?? EFFECTS[data.type].defaults.color ?? '#43ddff', { type: 'color' });
+    if (data.type === 'laneColor') {
+      html += checkField('元のレーン色に戻す', 'restoreLaneColor', data.color === null);
+      html += '<p class="editor-help">選んだレーンそれぞれの標準色へ、指定した長さで戻します。長さ0ならすぐに切り替わります。</p>';
+    }
+    if (data.type === 'laneColor' ? data.color !== null : !['lanePulse', 'backgroundStage'].includes(data.type) || data.color) html += field('色', 'color', data.color ?? EFFECTS[data.type].defaults.color ?? '#43ddff', { type: 'color' });
     if (['screenFade', 'backgroundStars', 'backgroundGLB', 'backgroundScene'].includes(data.type)) {
       const fade = Math.min(data.type === 'screenFade' ? 0.25 : 0.5, doc.duration(item) / 2);
       html += field('フェードイン（秒）', 'fadeInSeconds', data.fadeInSeconds ?? fade, { min: 0 });
@@ -287,6 +424,7 @@ function renderProperties() {
   for (const input of $('properties-content').querySelectorAll('[data-key]')) input.addEventListener('change', () => {
     const key = input.dataset.key;
     let value = input.type === 'checkbox' ? input.checked : input.type === 'number' ? input.value === '' ? NaN : Number(input.value) : input.value;
+    if (key === 'src' && value === '__embedded__') return;
     if (input.type === 'number' && !Number.isFinite(value)) return showError(new Error('数値を入力してください。'));
     edit(() => {
       const current = doc.get(selected);
@@ -327,8 +465,7 @@ function renderProperties() {
           doc.setEndTime(current, end);
         }
       } else if (key === 'noteType') {
-        if (value === 'hold') doc.setEndTime(current, doc.time(current) + 60 / doc.metadata.bpm);
-        else { delete current.data.endTimeSeconds; delete current.data.endBeat; }
+        setNoteKind(doc, current, value);
       } else if (key === 'endStamp') {
         if (current.data.endTimeSeconds !== undefined) current.data.endTimeSeconds = value;
         else current.data.endBeat = value;
@@ -337,6 +474,8 @@ function renderProperties() {
         else current.data.beat = value;
       } else if (key === 'inheritColor') {
         if (value) delete current.data.color; else current.data.color = current.data.type === 'backgroundStage' ? '#ffffff' : '#43ddff';
+      } else if (key === 'restoreLaneColor') {
+        current.data.color = value ? null : EFFECTS.laneColor.defaults.color;
       } else if (key.includes('.')) {
         const [vector, axis] = key.split('.');
         current.data[vector] = [...(current.data[vector] ?? EFFECTS[current.data.type].defaults[vector])];
@@ -353,6 +492,7 @@ function renderProperties() {
   });
   $('btn-prop-duplicate').onclick = duplicateSelection;
   $('btn-prop-delete').onclick = removeSelection;
+  if ($('btn-prop-skin')) $('btn-prop-skin').onclick = () => chooseSkin();
 }
 
 async function loadProject(next) {
@@ -367,7 +507,8 @@ async function loadProject(next) {
   }
   doc = candidate;
   selected = null;
-  project = { ...next, models: next.models ?? new Map(), audioDirty: false };
+  selectedIds.clear();
+  project = { ...next, models: next.models ?? new Map(), skins: next.skins ?? new Map(), audioDirty: false };
   engine.setSceneBaseURL(project.baseUrl ?? null);
   engine.stop();
   $('drop-zone').classList.add('hidden');
@@ -378,7 +519,7 @@ async function loadProject(next) {
 function chooseOsuDifficulty(maps) {
   const dialog = $('osu-difficulty-dialog');
   const select = $('osu-difficulty');
-  select.replaceChildren(...maps.map((map, index) => new Option(map.version + ' / ' + (map.sections.HitObjects?.length ?? 0) + 'ノーツ', String(index))));
+  select.replaceChildren(...maps.map((map, index) => new Option(map.version + (map.sections.HitObjects ? ' / ' + map.sections.HitObjects.length + 'ノーツ' : ''), String(index))));
   return new Promise((resolve, reject) => {
     dialog.addEventListener('close', () => {
       if (dialog.returnValue === 'open') resolve(maps[Number(select.value)]);
@@ -387,6 +528,10 @@ function chooseOsuDifficulty(maps) {
     dialog.returnValue = '';
     dialog.showModal();
   });
+}
+async function chooseProjectChart(names) {
+  const selected = await chooseOsuDifficulty(names.map(filename => ({ filename, version: filename, sections: {} })));
+  return selected.filename;
 }
 async function refreshSongs() {
   songs = await loadSongCatalog(new URL('../', document.baseURI));
@@ -405,34 +550,35 @@ async function saveProject() {
   }
   const same = project.directory && await directory.isSameEntry(project.directory);
   status('保存しています…');
-  const saved = await saveDirectory(directory, source, project.audio, !same || project.audioDirty, project.models, !same);
+  const saved = await saveDirectory(directory, source, project.audio, !same || project.audioDirty, project.models, !same, project.skins);
   project.directory = directory;
   project.audio = saved.audio;
   project.models = saved.models;
+  project.skins = saved.skins;
   project.audioDirty = false;
   doc.markSaved();
   changed();
-  status(directory.name + '/chart.json を保存しました。ゲーム側の選曲画面で選び直すと反映します。');
+  status(directory.name + '/' + difficultyFilename(source.difficulty) + ' を保存しました。ゲーム側の選曲画面で選び直すと反映します。');
 }
 
 $('btn-new').onclick = () => {
   if (busy) return;
   engine.stop(); engine.audioManager.clear();
-  doc = new ChartDocument(); selected = null;
-  project = { directory: null, audio: null, audioDirty: false, models: new Map(), label: '新規曲' };
+  doc = new ChartDocument(); selected = null; selectedIds.clear();
+  project = { directory: null, audio: null, audioDirty: false, models: new Map(), skins: new Map(), label: '新規曲' };
   engine.setSceneBaseURL(null);
   $('drop-zone').classList.add('hidden');
   timeline.container.scrollLeft = 0;
   changed(); status('新規曲 / 音声を選び、タイムラインにノーツを配置してください。');
 };
 $('btn-load-folder').onclick = () => run(async () => {
-  if (window.showDirectoryPicker) await loadProject(await readDirectory(await window.showDirectoryPicker({ mode: 'read' })));
+  if (window.showDirectoryPicker) await loadProject(await readDirectory(await window.showDirectoryPicker({ mode: 'read' }), chooseProjectChart));
   else $('file-folder-input').click();
 });
 $('file-folder-input').onchange = event => {
   const files = [...event.target.files];
   event.target.value = '';
-  if (files.length) run(async () => { await loadProject(await readFiles(files)); });
+  if (files.length) run(async () => { await loadProject(await readFiles(files, chooseProjectChart)); });
 };
 $('btn-audio').onclick = () => { if (!busy) $('audio-input').click(); };
 $('btn-osu-import').onclick = () => { if (!busy) $('osu-input').click(); };
@@ -442,6 +588,7 @@ $('osu-input').onchange = event => {
   if (files.length) run(async () => { await loadProject({ osuFiles: files.map(file => ({ file, path: file.name })) }); });
 };
 $('btn-model').onclick = () => { if (!busy) $('model-input').click(); };
+$('btn-skin').onclick = () => chooseSkin();
 $('model-input').onchange = event => {
   const files = [...event.target.files];
   event.target.value = '';
@@ -488,7 +635,7 @@ for (const element of [$('drop-zone'), $('viewport-container')]) {
 $('viewport-container').addEventListener('drop', event => {
   event.preventDefault(); $('drop-zone').classList.remove('dragging');
   const files = droppedFiles(event.dataTransfer);
-  run(async () => { await loadProject(await readFiles(await files)); });
+  run(async () => { await loadProject(await readFiles(await files, chooseProjectChart)); });
 });
 $('btn-refresh').onclick = () => run(async () => { await refreshSongs(); status('曲一覧を更新しました。'); });
 $('btn-server-open').onclick = () => run(async () => {
@@ -497,11 +644,10 @@ $('btn-server-open').onclick = () => run(async () => {
   await loadProject(await readServerSong(song));
 });
 $('btn-save').onclick = () => run(saveProject);
-$('btn-export').onclick = () => {
-  if (busy) return;
-  try { downloadJSON(doc.export()); status('chart.jsonをダウンロードしました。音声と同じ曲フォルダに配置してください。'); }
-  catch (error) { showError(error); }
-};
+$('btn-export').onclick = () => run(async () => {
+  downloadJSON(await embedSkinImages(doc.export(), project.skins));
+  status(difficultyFilename(doc.metadata.difficulty) + 'をダウンロードしました。スキン画像はJSON内に含め、音声は曲フォルダに配置します。');
+});
 $('btn-add-note').onclick = () => addItem('note', currentTime, Number($('note-lane').value));
 $('btn-add-sv').onclick = () => addItem('sv', currentTime);
 $('btn-add-effect').onclick = () => addItem('event', currentTime, $('effect-type').value);
@@ -575,13 +721,18 @@ function handleShortcut(event) {
   } else if (control && event.code === 'KeyZ') {
     event.preventDefault(); (event.shiftKey ? $('btn-redo') : $('btn-undo')).click();
   } else if (control && event.code === 'KeyY') { event.preventDefault(); $('btn-redo').click(); }
+  else if (control && event.code === 'KeyA') { event.preventDefault(); selectMany(doc.items.map(item => item.id)); }
   else if (control && event.code === 'KeyD') { event.preventDefault(); duplicateSelection(); }
+  else if (event.code === 'Escape') { event.preventDefault(); selectMany([]); }
   else if (event.code === 'Delete' || event.code === 'Backspace') { event.preventDefault(); removeSelection(); }
   else if (event.code === 'Space') { event.preventDefault(); if (!event.repeat) $('btn-play').click(); }
   else if (!control && !event.altKey && ['KeyD', 'KeyF', 'KeyJ', 'KeyK'].includes(event.code)) {
     event.preventDefault(); if (!event.repeat) addItem('note', currentTime, ['KeyD', 'KeyF', 'KeyJ', 'KeyK'].indexOf(event.code));
   } else if (event.code === 'ArrowLeft' || event.code === 'ArrowRight') {
-    event.preventDefault(); engine.seekTo(Math.max(0, currentTime + (event.code === 'ArrowRight' ? 1 : -1) * snapStep()) * 1000).catch(showError);
+    event.preventDefault();
+    const delta = (event.code === 'ArrowRight' ? 1 : -1) * snapStep();
+    if (control) moveSelection(delta);
+    else engine.seekTo(Math.max(0, currentTime + delta) * 1000).catch(showError);
   }
 }
 window.addEventListener('keydown', handleShortcut);

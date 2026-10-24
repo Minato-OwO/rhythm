@@ -1,6 +1,8 @@
 import { SV_MULTIPLIER_LIMIT } from './scroll-track.js';
+import { chartSkins, skinSource } from './chart-note-skins.js';
+import { isDifficulty, chartFileSource, difficultyFromFilename } from './difficulties.js';
 
-const EVENT_TYPES = new Set(['lanePulse', 'laneColor', 'screenFlash', 'screenFade', 'backgroundStage', 'backgroundColor', 'backgroundPulse', 'backgroundStars', 'backgroundGLB', 'backgroundScene']);
+const EVENT_TYPES = new Set(['noteSkin', 'lanePulse', 'laneColor', 'screenFlash', 'screenFade', 'backgroundStage', 'backgroundColor', 'backgroundPulse', 'backgroundStars', 'backgroundGLB', 'backgroundScene']);
 
 function eventTime(item, bpm, offset) {
   return item.timeSeconds ?? (item.beat * 60 / bpm + offset);
@@ -16,14 +18,21 @@ function normalizeEvent(event, index, bpm, offset, baseUrl) {
   if (!event || typeof event !== 'object' || !EVENT_TYPES.has(event.type)) invalid('typeが不正です。');
   const time = eventTime(event, bpm, offset);
   if (!Number.isFinite(time) || time < 0) invalid('beatまたはtimeSecondsを指定してください。');
+  if (event.type === 'noteSkin') {
+    const target = event.target ?? 'head';
+    if (!['head', 'body', 'all'].includes(target)) invalid('targetはhead・body・allで指定してください。');
+    if (event.tint !== undefined && typeof event.tint !== 'boolean') invalid('tintはtrue/falseで指定してください。');
+    return { id: index, type: event.type, time, duration: 0, target, src: skinSource(event.src, baseUrl), tint: event.tint ?? false };
+  }
   const defaults = { screenFade: 2, backgroundStage: 1, backgroundColor: 1, backgroundStars: 8, backgroundGLB: 8, backgroundScene: 8 };
   const duration = event.durationSeconds ?? defaults[event.type] ?? 0.4;
   if (!Number.isFinite(duration) || duration < 0 || duration === 0 && !['laneColor', 'backgroundColor', 'backgroundStage'].includes(event.type)) invalid('durationSecondsが不正です。');
   const intensity = event.intensity ?? (event.type === 'screenFlash' ? 0.25 : ['backgroundGLB', 'backgroundScene'].includes(event.type) ? 1 : 0.6);
   if (!Number.isFinite(intensity) || intensity < 0 || intensity > 1) invalid('intensityは0〜1で指定してください。');
-  const color = event.color ?? (['lanePulse', 'backgroundStage'].includes(event.type) ? null : event.type === 'screenFade' ? '#000000' : event.type === 'backgroundColor' ? '#090e19' : '#ffffff');
+  const color = event.type === 'laneColor' && event.color === null ? null
+    : event.color ?? (['lanePulse', 'backgroundStage'].includes(event.type) ? null : event.type === 'screenFade' ? '#000000' : event.type === 'backgroundColor' ? '#090e19' : '#ffffff');
   if (color !== null && (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color))) invalid('colorは#rrggbbで指定してください。');
-  if (event.type === 'laneColor' && typeof event.color !== 'string') invalid('laneColorにはcolorが必要です。');
+  if (event.type === 'laneColor' && event.color === undefined) invalid('laneColorにはcolorまたはnullが必要です。');
   const lanes = event.lanes ?? (event.lane !== undefined ? [event.lane] : [0, 1, 2, 3]);
   if (!Array.isArray(lanes) || !lanes.length || lanes.some(lane => !Number.isInteger(lane) || lane < 0 || lane > 3)) invalid('lanesは0〜3の配列で指定してください。');
   const soft = ['screenFade', 'backgroundStars', 'backgroundGLB', 'backgroundScene'].includes(event.type);
@@ -84,6 +93,7 @@ function normalizeEvent(event, index, bpm, offset, baseUrl) {
 export function normalizeChart(source, { baseUrl, allowEmptyNotes = false } = {}) {
   if (!source || typeof source !== 'object') throw new Error('譜面JSONの形式が不正です。');
   if (source.version !== undefined && source.version !== 1) throw new Error('譜面のversionは1を指定してください。');
+  if (source.difficulty !== undefined && !isDifficulty(source.difficulty)) throw new Error('difficultyはE・N・H・Xのみ指定できます。');
   if (!Number.isFinite(source.bpm) || source.bpm <= 0) throw new Error('譜面のbpmは正の数で指定してください。');
   if (!Array.isArray(source.notes) || !allowEmptyNotes && source.notes.length === 0) throw new Error('譜面にnotesがありません。');
   const offset = source.offsetSeconds ?? 0;
@@ -96,16 +106,20 @@ export function normalizeChart(source, { baseUrl, allowEmptyNotes = false } = {}
       throw new Error(`notes[${index}]の時刻またはレーンが不正です。`);
     }
     const key = `${note.lane}:${time}`;
-    if (duplicates.has(key)) throw new Error(`notes[${index}]が同じレーン・時刻と重複しています。`);
-    duplicates.add(key);
+    if (note.fake !== undefined && typeof note.fake !== 'boolean') throw new Error('fakeはtrue/falseで指定してください。notes[' + index + ']');
+    if (!note.fake) {
+      if (duplicates.has(key)) throw new Error(`notes[${index}]が同じレーン・時刻と重複しています。`);
+      duplicates.add(key);
+    }
     const endTime = note.endTimeSeconds ?? (note.endBeat !== undefined ? note.endBeat * 60 / source.bpm + offset : null);
     if (endTime !== null && (!Number.isFinite(endTime) || endTime <= time)) throw new Error('LNの終点は始点より後にしてください。notes[' + index + ']');
     const scrollMultiplier = note.scrollMultiplier === undefined ? 1 : note.scrollMultiplier;
     if (!Number.isFinite(scrollMultiplier) || Math.abs(scrollMultiplier) > SV_MULTIPLIER_LIMIT) throw new Error('個別SVのscrollMultiplierは-' + SV_MULTIPLIER_LIMIT + '〜' + SV_MULTIPLIER_LIMIT + 'の数値で指定してください。notes[' + index + ']');
-    return { id: index, lane: note.lane, time, endTime, scrollMultiplier };
+    return { id: index, lane: note.lane, time, endTime, scrollMultiplier, ...(note.fake ? { fake: true } : {}) };
   }).sort((a, b) => a.time - b.time || a.lane - b.lane);
   const laneEnds = [-Infinity, -Infinity, -Infinity, -Infinity];
   for (const note of notes) {
+    if (note.fake) continue;
     if (note.time < laneEnds[note.lane] - 0.000001) throw new Error('同じレーンのLNに別のノーツが重なっています。notes[' + note.id + ']');
     laneEnds[note.lane] = note.endTime ?? note.time;
   }
@@ -148,9 +162,11 @@ export function normalizeChart(source, { baseUrl, allowEmptyNotes = false } = {}
   if (source.flashWarningText !== undefined && typeof source.flashWarningText !== 'string') throw new Error('flashWarningTextは文字列で指定してください。');
   return {
     title: source.title ?? 'Untitled',
+    difficulty: source.difficulty ?? 'N',
     artist: source.artist ?? '',
     flashWarning: source.flashWarning ?? false,
     flashWarningText: source.flashWarningText?.trim() ?? '',
+    noteSkins: chartSkins(source.noteSkins, baseUrl),
     bpm: source.bpm,
     // 音声パスはページではなく譜面JSONを基準にする。
     audioUrl: audio && baseUrl ? new URL(audio, baseUrl).href : audio,
@@ -161,10 +177,11 @@ export function normalizeChart(source, { baseUrl, allowEmptyNotes = false } = {}
 
 export async function loadChart(url) {
   const chartUrl = new URL(url, document.baseURI);
+  if (!difficultyFromFilename(chartUrl.pathname)) throw new Error('chart_E.json・chart_N.json・chart_H.json・chart_X.jsonのみ読み込めます。');
   const response = await fetch(chartUrl, { cache: 'no-store' });
   if (!response.ok) throw new Error(`譜面を読み込めませんでした (${response.status}): ${chartUrl.pathname}`);
   let source;
   try { source = await response.json(); }
   catch { throw new Error(`JSONの書式が不正です: ${chartUrl.pathname}`); }
-  return normalizeChart(source, { baseUrl: chartUrl.href });
+  return normalizeChart(chartFileSource(source, chartUrl.pathname), { baseUrl: chartUrl.href });
 }

@@ -62,7 +62,7 @@ export class SongFrameClock extends AudioFrameClock {
   constructor(game, now) {
     super({
       time: () => game.songTime,
-      playing: () => game.state === 'playing',
+      playing: () => game.state === 'playing' && !game.countdownPending,
       context: () => game.audio.context,
       anchor: () => game.anchor,
     }, now);

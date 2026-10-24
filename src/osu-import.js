@@ -1,4 +1,5 @@
 import { normalizeChart } from './chart.js';
+import { importedDifficulty } from './difficulties.js';
 
 export function safeAssetPath(value) {
   const path = String(value ?? '').trim().replace(/^"|"$/g, '').replaceAll('\\', '/');
@@ -88,6 +89,7 @@ export function convertOsu(map) {
   if (!/\.(mp3|ogg|wav|m4a|flac|aac|opus|webm)$/i.test(audioPath)) throw new Error('対応する音声ファイルを指定してください: ' + audioPath);
   const source = {
     version: 1, title: title + ' [' + map.version + ']', artist: map.metadata.ArtistUnicode || map.metadata.Artist || '',
+    difficulty: importedDifficulty(map.version),
     bpm: 60000 / baseLength, audio: relativeAssetURL(audioPath), offsetSeconds: red[0].time / 1000,
     durationSeconds: Math.ceil(Math.max(end + 2, scrollVelocities.at(-1).timeSeconds + 0.1) * 1000) / 1000,
     notes, scrollVelocities, events: [],

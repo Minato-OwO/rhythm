@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "title": "Chronomia [NM]",
+  "title": "Chronomia",
+  "difficulty": "N",
   "artist": "Lime",
   "bpm": 227.00000000000006,
   "audio": "./audio.mp3",

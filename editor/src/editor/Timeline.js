@@ -24,9 +24,12 @@ export class Timeline {
     this.scale = 100;
     this.time = 0;
     this.selected = null;
+    this.selectedIds = new Set();
+    this.itemBounds = [];
     this.dragging = false;
     this.labels = document.getElementById('timeline-layers');
     this.container = document.getElementById('timeline-tracks-container');
+    this.container.tabIndex = 0;
     this.tracks = document.getElementById('timeline-tracks');
     this.ruler = document.getElementById('timeline-ruler');
     this.rulerContent = document.getElementById('timeline-ruler-content');
@@ -38,21 +41,110 @@ export class Timeline {
     this.labels.addEventListener('wheel', event => { this.container.scrollTop += event.deltaY; event.preventDefault(); }, { passive: false });
     this.ruler.addEventListener('pointerdown', event => this.seekPointer(event));
     this.tracks.addEventListener('pointerdown', event => {
-      if (event.button === 0 && !event.target.closest('.timeline-block')) this.seekPointer(event);
+      if (event.button === 0 && !event.target.closest('.timeline-block')) {
+        if (event.ctrlKey || event.metaKey) this.rangeSelect(event);
+        else this.seekPointer(event);
+      }
     });
   }
 
   px(seconds) { return seconds * this.scale; }
   snap(seconds, bypass = false) { return Math.max(0, bypass ? seconds : this.snapTime(seconds)); }
-  selection(id) {
-    this.selected = id;
-    for (const block of this.tracks.querySelectorAll('.timeline-block')) block.classList.toggle('selected', block.dataset.id === id);
+  selection(ids, primary = null) {
+    this.selectedIds = new Set(typeof ids === 'string' ? [ids] : ids ?? []);
+    this.selected = primary ?? [...this.selectedIds].at(-1) ?? null;
+    for (const block of this.tracks.querySelectorAll('.timeline-block')) block.classList.toggle('selected', this.selectedIds.has(block.dataset.id));
+  }
+
+  // 共通のドラッグ監視。画面端ではスクロールし、Escape・中断で取り消す。
+  watchPointer(event, update, finish) {
+    let pointer = event, frame = null, done = false, moved = false;
+    this.tracks.setPointerCapture?.(event.pointerId);
+    const move = next => {
+      if (next.pointerId !== event.pointerId) return;
+      pointer = next;
+      moved ||= Math.abs(next.clientX - event.clientX) >= 3 || Math.abs(next.clientY - event.clientY) >= 3;
+      update(next);
+    };
+    const stop = cancelled => {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', cancel);
+      window.removeEventListener('keydown', key, true);
+      if (this.tracks.hasPointerCapture?.(event.pointerId)) this.tracks.releasePointerCapture(event.pointerId);
+      finish(cancelled);
+    };
+    const up = next => { if (next.pointerId === event.pointerId) { move(next); stop(false); } };
+    const cancel = next => { if (next.type !== 'pointercancel' || next.pointerId === event.pointerId) stop(true); };
+    const key = next => { if (next.code === 'Escape') { next.preventDefault(); next.stopPropagation(); stop(true); } };
+    const scroll = () => {
+      if (done) return;
+      const rect = this.container.getBoundingClientRect();
+      const speed = (position, min, max) => position < min + 28 ? -Math.min(18, (min + 28 - position) / 3)
+        : position > max - 28 ? Math.min(18, (position - max + 28) / 3) : 0;
+      const left = this.container.scrollLeft, top = this.container.scrollTop;
+      if (moved) {
+        this.container.scrollLeft += speed(pointer.clientX, rect.left, rect.right);
+        this.container.scrollTop += speed(pointer.clientY, rect.top + 24, rect.bottom);
+      }
+      this.labels.scrollTop = this.container.scrollTop;
+      if (left !== this.container.scrollLeft || top !== this.container.scrollTop) update(pointer);
+      frame = requestAnimationFrame(scroll);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
+    window.addEventListener('keydown', key, true);
+    frame = requestAnimationFrame(scroll);
+  }
+
+  rangeIds(rect, base = []) {
+    const ids = new Set(base);
+    for (const item of this.itemBounds) {
+      if (item.left <= rect.right && item.right >= rect.left && item.top <= rect.bottom && item.bottom >= rect.top) ids.add(item.id);
+    }
+    return [...ids];
+  }
+
+  rangeSelect(event) {
+    if (this.dragging || event.button !== 0) return;
+    event.preventDefault();
+    this.container.focus({ preventScroll: true });
+    const base = [...this.selectedIds];
+    const point = pointer => {
+      const rect = this.tracks.getBoundingClientRect();
+      return { x: Math.max(0, Math.min(this.tracks.scrollWidth, pointer.clientX - rect.left)), y: Math.max(0, Math.min(this.tracks.scrollHeight, pointer.clientY - rect.top)) };
+    };
+    const start = point(event);
+    const box = document.createElement('div');
+    box.className = 'timeline-selection-box';
+    box.setAttribute('aria-hidden', 'true');
+    this.tracks.append(box);
+    this.dragging = true;
+    const update = pointer => {
+      const end = point(pointer);
+      const rect = { left: Math.min(start.x, end.x), right: Math.max(start.x, end.x), top: Math.min(start.y, end.y), bottom: Math.max(start.y, end.y) };
+      Object.assign(box.style, { left: rect.left + 'px', top: rect.top + 'px', width: rect.right - rect.left + 'px', height: rect.bottom - rect.top + 'px' });
+      const ids = this.rangeIds(rect, base);
+      if (ids.length !== this.selectedIds.size || ids.some(id => !this.selectedIds.has(id))) this.onSelectMany(ids);
+    };
+    this.watchPointer(event, update, cancelled => {
+      box.remove();
+      if (cancelled) this.onSelectMany(base);
+      this.dragging = false;
+      this.render();
+    });
   }
   setTime(seconds, follow = false) {
     this.time = seconds;
     this.playhead.style.left = this.px(seconds) + 'px';
     this.playhead.style.top = (24 + this.container.scrollTop) + 'px';
-    if (follow && (this.px(seconds) < this.container.scrollLeft || this.px(seconds) > this.container.scrollLeft + this.container.clientWidth - 70)) this.container.scrollLeft = Math.max(0, this.px(seconds) - 100);
+    if (follow && !this.dragging && (this.px(seconds) < this.container.scrollLeft || this.px(seconds) > this.container.scrollLeft + this.container.clientWidth - 70)) this.container.scrollLeft = Math.max(0, this.px(seconds) - 100);
   }
   zoom(multiplier) {
     const position = this.px(this.time) - this.container.scrollLeft;
@@ -62,8 +154,9 @@ export class Timeline {
   }
 
   seekPointer(event) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || this.dragging) return;
     event.preventDefault();
+    this.container.focus({ preventScroll: true });
     const move = pointer => {
       const rect = this.container.getBoundingClientRect();
       const time = this.snap((pointer.clientX - rect.left + this.container.scrollLeft) / this.scale, pointer.shiftKey || pointer.altKey);
@@ -122,6 +215,7 @@ export class Timeline {
     this.labels.replaceChildren();
     this.tracks.replaceChildren();
     this.rulerContent.replaceChildren();
+    this.itemBounds = [];
     this.ruler.style.width = width + 'px';
     this.rulerContent.style.width = width + 'px';
     this.tracks.style.width = width + 'px';
@@ -144,6 +238,7 @@ export class Timeline {
       { kind: 'sv', label: '全体SV / 速度変更', color: '#ffd47b', items: doc.svs },
       ...Object.entries(EFFECTS).map(([type, spec]) => ({ kind: 'event', type, label: spec.label, color: spec.color, items: doc.events.filter(item => item.data.type === type) })),
     ];
+    let groupTop = 0;
     for (const group of groups) {
       const sorted = [...group.items].sort((a, b) => doc.time(a) - doc.time(b));
       const rowEnds = [];
@@ -167,20 +262,24 @@ export class Timeline {
       track.style.height = height + 'px';
       track.dataset.lane = group.lane ?? '';
       track.addEventListener('dblclick', event => {
-        if (event.target.closest('.timeline-block')) return;
+        if (event.ctrlKey || event.metaKey || event.target.closest('.timeline-block')) return;
         const seconds = this.snap((event.clientX - track.getBoundingClientRect().left) / this.scale, event.shiftKey);
         this.onAdd(group.kind, seconds, group.kind === 'note' ? group.lane : group.type);
       });
       for (const item of sorted) {
         const start = doc.time(item);
         const duration = doc.duration(item);
+        const blockWidth = Math.max(item.kind === 'note' ? 14 : 18, this.px(duration));
+        const blockTop = 4 + rows.get(item.id) * 30;
+        // 画面外の項目も範囲選択に含める。DOMの仮想化とは独立した座標を使う。
+        this.itemBounds.push({ id: item.id, left: this.px(start), right: this.px(start) + blockWidth, top: groupTop + blockTop, bottom: groupTop + blockTop + 22 });
         if (start + duration < visibleStart || start > visibleEnd) continue;
         const block = document.createElement('div');
-        block.className = 'timeline-block' + (item.kind === 'note' ? ' note-block' : '') + (item.id === this.selected ? ' selected' : '');
+        block.className = 'timeline-block' + (item.kind === 'note' ? ' note-block' : '') + (this.selectedIds.has(item.id) ? ' selected' : '');
         block.dataset.id = item.id;
         block.style.left = this.px(start) + 'px';
-        block.style.width = Math.max(item.kind === 'note' ? 14 : 18, this.px(duration)) + 'px';
-        block.style.top = (4 + rows.get(item.id) * 30) + 'px';
+        block.style.width = blockWidth + 'px';
+        block.style.top = blockTop + 'px';
         block.style.background = group.color;
         const rangeSV = item.kind === 'sv' && isRangeSV(item.data);
         const speedSV = item.kind === 'sv' && item.data.type === 'speed';
@@ -193,6 +292,11 @@ export class Timeline {
           if (rangeSV) block.title += ' / ' + (item.data.durationBeats !== undefined ? item.data.durationBeats + '拍' : duration.toFixed(3) + '秒') + ' / ' + (item.data.easing === 'smoothstep' ? 'なめらか' : '一定の割合');
         }
         if (item.kind === 'note') {
+          if (item.data.fake) {
+            block.classList.add('fake-note');
+            block.textContent += ' / FAKE';
+            block.title += ' / フェイク（判定なし）';
+          }
           const multiplier = item.data.scrollMultiplier ?? 1;
           block.title += ' / 個別SV ×' + multiplier;
           if (multiplier !== 1) {
@@ -200,7 +304,7 @@ export class Timeline {
             block.textContent += ' / ×' + multiplier;
           }
         }
-        if (item.kind === 'event' || item.kind === 'note' && duration > 0 || rangeSV) {
+        if (item.kind === 'event' && item.data.type !== 'noteSkin' || item.kind === 'note' && duration > 0 || rangeSV) {
           for (const side of ['left', 'right']) {
             const handle = document.createElement('div');
             handle.className = 'timeline-handle ' + side;
@@ -213,73 +317,86 @@ export class Timeline {
         track.append(block);
       }
       this.tracks.append(track);
+      groupTop += height;
     }
     this.setTime(this.time);
   }
 
   drag(event, id, block) {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || this.dragging) return;
     event.preventDefault();
     event.stopPropagation();
-    this.onSelect(id);
+    this.container.focus({ preventScroll: true });
+    if (event.ctrlKey || event.metaKey) { this.onSelect(id, { toggle: true }); return; }
+    const side = event.target.dataset.side;
+    this.onSelect(id, { preserve: !side });
     const doc = this.getDocument();
     const original = doc.get(id);
+    const originalLane = original.data.lane;
     const start = doc.time(original);
     const duration = doc.duration(original);
-    const side = event.target.dataset.side;
+    const origins = doc.movementOrigins(this.selectedIds);
+    const blocks = [...this.tracks.querySelectorAll('.timeline-block')].filter(element => this.selectedIds.has(element.dataset.id))
+      .map(element => ({ element, parent: element.parentElement, top: element.style.top }));
     const startX = event.clientX;
     const scrollStart = this.container.scrollLeft;
     this.dragging = true;
     doc.beginEdit();
+    let moved = false;
     const move = pointer => {
       const delta = (pointer.clientX - startX + this.container.scrollLeft - scrollStart) / this.scale;
+      if (!moved && Math.abs(pointer.clientX - startX) < 3 && Math.abs(delta * this.scale) < 3 && Math.abs(pointer.clientY - event.clientY) < 3) return;
+      moved = true;
       try {
-        doc.change(() => {
-          const item = doc.get(id);
-          const minimum = ['laneColor', 'backgroundColor', 'backgroundStage'].includes(item.data.type) ? 0 : 0.01;
-          if (item.kind === 'sv' && side === 'right') {
-            doc.setSVDuration(item, Math.max(0, this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey) - start));
-          } else if (item.kind === 'sv' && side === 'left') {
-            const newStart = Math.min(start + duration, this.snap(start + delta, pointer.shiftKey || pointer.altKey));
-            doc.setTime(item, newStart);
-            doc.setSVDuration(item, Math.max(0, start + duration - newStart));
-          } else if (item.kind === 'note' && side === 'right') {
-            doc.setEndTime(item, Math.max(start + 0.001, this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey)));
-          } else if (item.kind === 'note' && side === 'left') {
-            doc.setTime(item, Math.min(start + duration - 0.001, this.snap(start + delta, pointer.shiftKey || pointer.altKey)));
-            doc.setEndTime(item, start + duration);
-          } else if (side === 'right') {
-            const end = this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey);
-            item.data.durationSeconds = Math.max(minimum, end - start);
-          } else if (side === 'left') {
-            const newStart = Math.min(start + duration - minimum, this.snap(start + delta, pointer.shiftKey || pointer.altKey));
-            doc.setTime(item, newStart);
-            item.data.durationSeconds = Math.max(minimum, start + duration - newStart);
-          } else {
-            doc.setTime(item, this.snap(start + delta, pointer.shiftKey || pointer.altKey));
-            if (item.kind === 'note') {
-              const target = document.elementFromPoint(pointer.clientX, pointer.clientY)?.closest('.timeline-track');
-              if (target?.dataset.lane !== undefined && target.dataset.lane !== '') item.data.lane = Number(target.dataset.lane);
+        if (!side) {
+          const target = document.elementFromPoint(pointer.clientX, pointer.clientY)?.closest('.timeline-track');
+          const laneDelta = original.kind === 'note' && target?.dataset.lane !== undefined && target.dataset.lane !== '' ? Number(target.dataset.lane) - originalLane : 0;
+          doc.moveItems(origins, this.snap(start + delta, pointer.shiftKey || pointer.altKey) - start, laneDelta, false);
+        } else {
+          doc.change(() => {
+            const item = doc.get(id);
+            const minimum = ['laneColor', 'backgroundColor', 'backgroundStage'].includes(item.data.type) ? 0 : 0.01;
+            if (item.kind === 'sv' && side === 'right') {
+              doc.setSVDuration(item, Math.max(0, this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey) - start));
+            } else if (item.kind === 'sv' && side === 'left') {
+              const newStart = Math.min(start + duration, this.snap(start + delta, pointer.shiftKey || pointer.altKey));
+              doc.setTime(item, newStart);
+              doc.setSVDuration(item, Math.max(0, start + duration - newStart));
+            } else if (item.kind === 'note' && side === 'right') {
+              doc.setEndTime(item, Math.max(start + 0.001, this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey)));
+            } else if (item.kind === 'note' && side === 'left') {
+              doc.setTime(item, Math.min(start + duration - 0.001, this.snap(start + delta, pointer.shiftKey || pointer.altKey)));
+              doc.setEndTime(item, start + duration);
+            } else if (side === 'right') {
+              const end = this.snap(start + duration + delta, pointer.shiftKey || pointer.altKey);
+              item.data.durationSeconds = Math.max(minimum, end - start);
+            } else if (side === 'left') {
+              const newStart = Math.min(start + duration - minimum, this.snap(start + delta, pointer.shiftKey || pointer.altKey));
+              doc.setTime(item, newStart);
+              item.data.durationSeconds = Math.max(minimum, start + duration - newStart);
             }
+            doc.fitFade(item);
+          }, false);
+        }
+        const items = new Map(doc.items.map(item => [item.id, item]));
+        for (const { element, parent, top } of blocks) {
+          const item = items.get(element.dataset.id);
+          element.style.left = this.px(doc.time(item)) + 'px';
+          element.style.width = Math.max(item.kind === 'note' ? 14 : 18, this.px(doc.duration(item))) + 'px';
+          if (item.kind === 'note') {
+            const track = this.tracks.querySelector('.timeline-track[data-lane="' + item.data.lane + '"]');
+            if (track) track.append(element);
+            element.style.top = track === parent ? top : '4px';
           }
-          doc.fitFade(item);
-        }, false);
-        const item = doc.get(id);
-        block.style.left = this.px(doc.time(item)) + 'px';
-        block.style.width = Math.max(item.kind === 'note' ? 14 : 18, this.px(doc.duration(item))) + 'px';
+        }
         this.onChange(false);
       } catch (error) { this.onError(error); }
     };
-    const finish = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', finish);
-      window.removeEventListener('pointercancel', finish);
+    const finish = cancelled => {
       this.dragging = false;
-      doc.endEdit();
+      if (cancelled) doc.cancelEdit(); else doc.endEdit();
       this.onChange(true);
     };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', finish, { once: true });
-    window.addEventListener('pointercancel', finish, { once: true });
+    this.watchPointer(event, move, finish);
   }
 }

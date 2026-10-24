@@ -13,6 +13,10 @@ import { SpatialUI } from './spatial-ui.js';
 import { TimelineEffects } from './timeline-effects.js';
 import { BackgroundEffects } from './background-effects.js';
 import { downloadSettings } from './settings-export.js';
+import { ChartNoteSkins } from './chart-note-skins.js';
+import { legacyChartIds } from './difficulties.js';
+import { PlayTransition } from './play-transition.js';
+import { UISounds, shortcutSound } from './ui-sounds.js';
 
 const storageKey = 'fourflow.settings.v1';
 const settings = { ...DEFAULT_SETTINGS };
@@ -35,8 +39,9 @@ async function bootstrap() {
   const songs = await loadSongLibrary();
   let savedSong = null;
   try { savedSong = localStorage.getItem('fourflow.song.v1'); } catch { /* 保存不可でも選曲可能。 */ }
-  const initialSong = songs.find(song => song.id === savedSong || song.difficulties.some(difficulty => difficulty.id === savedSong)) ?? songs[0];
-  const initialDifficulty = initialSong.difficulties.find(difficulty => difficulty.id === savedSong) ?? initialSong.difficulties[0];
+  const matchesSaved = difficulty => difficulty.id === savedSong || legacyChartIds(difficulty.id).includes(savedSong);
+  const initialSong = songs.find(song => song.id === savedSong || song.difficulties.some(matchesSaved)) ?? songs[0];
+  const initialDifficulty = initialSong.difficulties.find(matchesSaved) ?? initialSong.difficulties[0];
   const chart = await loadChart(initialDifficulty.chartUrl);
   const songLibrary = { songs, selectedId: initialSong.id, selectedDifficultyId: initialDifficulty.id, analysis: analyzeChart(chart), personalBests: new PersonalBests() };
   const rememberedDifficulties = new Map([[initialSong.id, initialDifficulty.id]]);
@@ -45,11 +50,29 @@ async function bootstrap() {
   const frameClock = new SongFrameClock(game);
   const renderResolution = new RenderResolution(scene);
   const view = new StageView(scene, settings);
+  const noteSkinTrack = new ChartNoteSkins(view.noteSkins);
+  let skinLoadError = '';
+  try { await noteSkinTrack.preload(chart); noteSkinTrack.setChart(chart); }
+  catch (error) { skinLoadError = error.message; noteSkinTrack.setChart({ events: [] }); }
   const timeline = new TimelineEffects(scene, view, settings, chart);
   const background = new BackgroundEffects(scene, view, chart);
+  const uiSounds = new UISounds(settings.hitVolume / 100);
+  void uiSounds.preload().catch(() => { /* 操作SEの失敗でメニューや演奏を止めない。 */ });
   const trackingRig = scene.querySelector('#rig').object3D;
   let ui;
   let vr;
+  const playTransition = new PlayTransition(scene, {
+    onActive: active => {
+      if (!ui) return;
+      ui.inputBlocked = active;
+      if (!active) {
+        ui.root.visible = true;
+        if (!playTransition.disposed) game.beginCountdown();
+      }
+    },
+    onCovered: () => { if (ui) ui.root.visible = false; },
+    canReveal: () => !ui || ui.screenPhase === 'stable' && ui.screenKey === ui.screenViewKey(),
+  });
   let actionBusy = false;
   let pauseRequested = false;
   let lastAnchor = game.anchor;
@@ -75,11 +98,13 @@ async function bootstrap() {
     await game.pause();
     // 譜面の検証を終えてから選択を確定する。背景素材はプレイ開始時に読み込む。
     const nextChart = await loadChart(difficulty.chartUrl);
+    await noteSkinTrack.preload(nextChart);
     songLibrary.selectedId = song.id;
     songLibrary.selectedDifficultyId = difficulty.id;
     rememberedDifficulties.set(song.id, difficulty.id);
     updateChartAnalysis(nextChart);
     game.setChart(nextChart);
+    noteSkinTrack.setChart(nextChart);
     ui.selectionChanged();
     try { localStorage.setItem('fourflow.song.v1', difficulty.id); } catch { /* 保存不可でも選曲可能。 */ }
   }
@@ -102,10 +127,10 @@ async function bootstrap() {
     vr?.reset();
   }
 
-  async function runAction(action) {
+  async function runAction(action, { preserveSelectionAppearance = false } = {}) {
     if (actionBusy) return;
     actionBusy = true;
-    ui?.setBusy(true);
+    ui?.setBusy(true, { preserveSelectionAppearance });
     ui?.setMessage('');
     try {
       await action();
@@ -124,29 +149,50 @@ async function bootstrap() {
 
   async function startSelectedSong() {
     const song = songLibrary.songs.find(item => item.id === songLibrary.selectedId);
-    if (!song?.difficulties.some(difficulty => difficulty.id === songLibrary.selectedDifficultyId)) throw new Error('プレイする曲と難易度を選んでください。');
+    const difficulty = song?.difficulties.find(item => item.id === songLibrary.selectedDifficultyId);
+    if (!difficulty) throw new Error('プレイする曲と難易度を選んでください。');
+    if (ui.songSelectionOpen && !ui.settingsOpen) {
+      const chart = game.chart;
+      await playTransition.run({ title: song.title, artist: chart.artist || song.artist, difficulty: difficulty.difficulty, level: difficulty.level }, {
+        unlock: () => audio.resume(),
+        prepare: async () => {
+          await Promise.all([background.preload(), noteSkinTrack.preload(chart), audio.prepare(chart)]);
+          if (noteSkinTrack.chart !== chart) noteSkinTrack.setChart(chart);
+        },
+        start: () => game.start({ deferCountdown: true }),
+      });
+      return;
+    }
     await background.preload();
+    await noteSkinTrack.preload(game.chart);
+    if (noteSkinTrack.chart !== game.chart) noteSkinTrack.setChart(game.chart);
     await game.start();
   }
 
   const actions = {
+    playUISound: name => {
+      if (actionBusy || playTransition.active || ui?.inputBlocked) return;
+      void uiSounds.play(name).catch(() => { /* 次の操作で再試行する。 */ });
+    },
     toggle: () => runAction(async () => {
+      if (playTransition.active) return;
       if (ui.settingsOpen) return;
       if (ui.songSelectionOpen) { await startSelectedSong(); return; }
       if (game.state === 'idle') { ui.showSongSelection(); return; }
       if (game.state === 'playing') await game.pause();
       else if (game.state === 'paused') await game.resume();
       else await startSelectedSong();
-    }),
+    }, { preserveSelectionAppearance: ui?.songSelectionOpen && !ui.settingsOpen }),
     startSelected: () => runAction(async () => {
       if (!ui.songSelectionOpen || ui.settingsOpen) return;
       await startSelectedSong();
-    }),
+    }, { preserveSelectionAppearance: true }),
     resume: () => runAction(async () => {
       if (ui.settingsOpen || ui.songSelectionOpen) return;
       await game.resume();
     }),
     restart: () => runAction(async () => {
+      if (playTransition.active) return;
       if (game.state === 'idle') { ui.showSongSelection(); return; }
       await game.pause();
       await startSelectedSong();
@@ -177,20 +223,21 @@ async function bootstrap() {
       await selectDifficulty(song, difficulty, true);
       songLibrary.songs = nextSongs;
       ui.selectionChanged();
+      ui.invalidate();
     }),
     chooseSong: id => runAction(async () => {
       const song = songLibrary.songs.find(item => item.id === id);
       if (!song) throw new Error('曲が見つかりません。一覧を更新してください。');
       const remembered = rememberedDifficulties.get(song.id);
       await selectDifficulty(song, song.difficulties.find(item => item.id === remembered) ?? song.difficulties[0]);
-    }),
+    }, { preserveSelectionAppearance: true }),
     chooseDifficulty: id => runAction(async () => {
       const song = songLibrary.songs.find(item => item.id === songLibrary.selectedId);
       if (!song) throw new Error('曲を選択してください。');
       const difficulty = song.difficulties.find(item => item.id === id);
       if (!difficulty) throw new Error('難易度が見つかりません。一覧を更新してください。');
       await selectDifficulty(song, difficulty);
-    }),
+    }, { preserveSelectionAppearance: true }),
     recenter: () => runAction(async () => {
       await game.pause();
       if (scene.is('vr-mode')) {
@@ -218,7 +265,10 @@ async function bootstrap() {
       if (settings[name] === nextValue) return;
       settings[name] = nextValue;
       if (name === 'volume') audio.setVolume(settings.volume / 100);
-      if (name === 'hitVolume') audio.setHitVolume(settings.hitVolume / 100);
+      if (name === 'hitVolume') {
+        audio.setHitVolume(settings.hitVolume / 100);
+        uiSounds.setVolume(settings.hitVolume / 100);
+      }
       if (name === 'audioOffset') audio.setAudioOffset(settings.audioOffset);
       if (name === 'laneCoverTransparency') view.applyLaneCoverOpacity();
       else if (GAUGE_SETTING_DEFINITIONS.some(item => item.key === name)) view.gauges.applyLayout();
@@ -295,12 +345,13 @@ async function bootstrap() {
       await game.pause();
     }),
     select: source => ui.selectXR(source),
-    canQuickStart: () => !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
+    canQuickStart: () => !playTransition.active && !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
     updatePointers: (frame, space, sources) => ui.updateXR(frame, space, sources),
     clearPointers: () => ui.clearXR(),
   };
 
   ui = new SpatialUI(scene, view, game, settings, actions, songLibrary);
+  if (skinLoadError) ui.setMessage(skinLoadError);
   vr = new VRInput(scene, game, view, settings, actions);
   updateChartAnalysis(chart);
   ui.selectionChanged();
@@ -314,7 +365,7 @@ async function bootstrap() {
     }
     if (game.state === 'idle') { view.clearNotes(); timeline.reset(); background.reset(); }
     if (game.state === 'finished') {
-      songLibrary.personalBests.record(songLibrary.selectedDifficultyId, {
+      if (game.totalNotes > 0) songLibrary.personalBests.record(songLibrary.selectedDifficultyId, {
         score: game.score,
         accuracy: game.accuracy,
         bonusAccuracy: game.bonusAccuracy,
@@ -334,6 +385,7 @@ async function bootstrap() {
     ui.chartChanged();
   });
   game.addEventListener('stats', () => ui.markStatsDirty());
+  game.addEventListener('countdownstart', () => frameClock.synchronize());
   game.addEventListener('judgement', ({ detail }) => {
     view.showJudgement(detail);
     if (detail.rating !== 'miss') view.flash(detail.note.lane, true);
@@ -360,6 +412,10 @@ async function bootstrap() {
       return;
     }
     if (event.repeat) return;
+    if (!actionBusy && !playTransition.active) {
+      const sound = shortcutSound(event.code, { settingsOpen: ui.settingsOpen, songSelectionOpen: ui.songSelectionOpen, gameState: game.state });
+      if (sound) actions.playUISound(sound);
+    }
     if (event.code === 'Space') { event.preventDefault(); actions.toggle(); }
     if (event.code === 'KeyR') { event.preventDefault(); actions.restart(); }
     if (event.code === 'KeyO') { event.preventDefault(); ui.settingsOpen ? ui.closeSettings() : actions.settings(); }
@@ -447,7 +503,9 @@ async function bootstrap() {
       game.update();
       timeline.update(songTime, game.state);
       background.update(songTime, game.state);
+      noteSkinTrack.update(game.state === 'playing' || game.state === 'paused' ? songTime : -Infinity);
       view.update(game, now, songTime);
+      playTransition.update(now);
     },
     remove() {
       scene.removeEventListener('renderstart', this.installLoop);
@@ -455,6 +513,8 @@ async function bootstrap() {
       frameClock.dispose();
       renderResolution.dispose();
       vr.disconnect();
+      playTransition.dispose();
+      uiSounds.dispose();
       ui.dispose();
       view.disposeText();
       view.disposeNotes();
@@ -467,6 +527,8 @@ async function bootstrap() {
   });
   scene.setAttribute('four-flow-loop', '');
   window.addEventListener('pagehide', () => {
+    playTransition.dispose();
+    uiSounds.dispose();
     analysisController?.abort();
     vr.disconnect();
     detachHitSounds();

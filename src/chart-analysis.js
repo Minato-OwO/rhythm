@@ -5,19 +5,22 @@ export function analyzeChart(chart, audioDuration = null) {
   const lanes = Array.from({ length: 4 }, () => ({ taps: 0, longNotes: 0, total: 0 }));
   let taps = 0;
   let longNotes = 0;
+  let fakeNotes = 0;
   let timelineDuration = duration;
   for (const note of chart.notes) {
+    timelineDuration = Math.max(timelineDuration, note.endTime ?? note.time);
+    if (note.fake) { fakeNotes++; continue; }
     const hold = note.endTime !== null && note.endTime !== undefined;
     const lane = lanes[note.lane];
     if (hold) { lane.longNotes++; longNotes++; }
     else { lane.taps++; taps++; }
     lane.total++;
-    timelineDuration = Math.max(timelineDuration, note.endTime ?? note.time);
   }
   // 長時間の譜面でも集計用メモリーを一定量に抑える。
   const binSeconds = Math.max(1, Math.ceil(timelineDuration / 1200));
   const bins = Array.from({ length: Math.max(1, Math.ceil(timelineDuration / binSeconds)) }, () => ({ taps: 0, longNotes: 0 }));
   for (const note of chart.notes) {
+    if (note.fake) continue;
     const bin = bins[Math.min(bins.length - 1, Math.floor(note.time / binSeconds))];
     if (note.endTime !== null && note.endTime !== undefined) bin.longNotes++;
     else bin.taps++;
@@ -26,7 +29,7 @@ export function analyzeChart(chart, audioDuration = null) {
   for (const bin of bins) peakDensity = Math.max(peakDensity, (bin.taps + bin.longNotes) / binSeconds);
   return {
     duration, durationSource: hasAudioDuration ? 'audio' : 'chart', timelineDuration,
-    taps, longNotes, total: taps + longNotes, lanes, bins, binSeconds,
+    taps, longNotes, fakeNotes, total: taps + longNotes, lanes, bins, binSeconds,
     averageDensity: (taps + longNotes) / duration, peakDensity,
   };
 }

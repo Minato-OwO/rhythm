@@ -1,5 +1,5 @@
 import { AudioManager } from './AudioManager.js';
-import { assetPath } from './ProjectFiles.js';
+import { assetPath, embeddedSkin } from './ProjectFiles.js';
 import { createPreviewClock } from './PreviewClock.js';
 
 export class PreviewEngine {
@@ -16,6 +16,8 @@ export class PreviewEngine {
     this.prepared = Promise.resolve();
     this.modelAssets = new Map();
     this.modelURLs = new Map();
+    this.skinAssets = new Map();
+    this.skinURLs = new Map();
     this.metronomeEnabled = false;
     this.metronomeVolume = 0.5;
     this.lastScheduledBeat = null;
@@ -70,9 +72,27 @@ export class PreviewEngine {
     if (!record) { record = { file: asset.file, url: URL.createObjectURL(asset.file) }; this.modelURLs.set(path, record); }
     return record.url;
   }
+  setSkinAssets(assets = new Map()) {
+    this.skinAssets = assets;
+    for (const [path, record] of this.skinURLs) {
+      if (assets.get(path)?.file === record.file) continue;
+      URL.revokeObjectURL(record.url);
+      this.skinURLs.delete(path);
+    }
+  }
+  skinURL(src) {
+    if (embeddedSkin(src)) return src;
+    const path = assetPath(src), asset = this.skinAssets.get(path);
+    if (!asset) throw new Error('ノーツスキン画像がありません: ' + path + '。「スキン画像を追加」から読み込んでください。');
+    if (!asset.file) return asset.url;
+    let record = this.skinURLs.get(path);
+    if (!record) { record = { file: asset.file, url: URL.createObjectURL(asset.file) }; this.skinURLs.set(path, record); }
+    return record.url;
+  }
   loadChart(chart) {
     // プレビューだけURLへ変換する。保存するJSONには相対ファイル名を残す。
     const events = chart.events.map(event => {
+      if (event.type === 'noteSkin' && event.src) return { ...event, src: this.skinURL(event.src) };
       if (event.type === 'backgroundGLB' && event.src) return { ...event, src: this.modelURL(event.src) };
       if (event.type === 'backgroundScene' && event.src) {
         if (!this.sceneBaseURL && !/^(?:https?:)?\/\//i.test(event.src) && !event.src.startsWith('/')) throw new Error('背景JSをプレビューするには「ゲームの曲」から曲を開いてください。');
@@ -80,7 +100,9 @@ export class PreviewEngine {
       }
       return event;
     });
-    this.chart = { ...chart, events };
+    const noteSkins = { ...chart.noteSkins };
+    for (const slot of ['head', 'body']) if (noteSkins[slot]) noteSkins[slot] = this.skinURL(noteSkins[slot]);
+    this.chart = { ...chart, events, noteSkins };
     this.audioManager.duration = chart.duration;
     if (this.audioManager.pauseTime > chart.duration) this.audioManager.pauseTime = chart.duration;
     this.pending?.resolve();
@@ -137,6 +159,7 @@ export class PreviewEngine {
     window.removeEventListener('message', this.message);
     if (this.iframe.fourFlowClock === this.clock) delete this.iframe.fourFlowClock;
     for (const record of this.modelURLs.values()) URL.revokeObjectURL(record.url);
+    for (const record of this.skinURLs.values()) URL.revokeObjectURL(record.url);
     this.audioManager.pause();
     this.audioManager.frameClock.dispose();
     this.audioManager.audioContext?.close();

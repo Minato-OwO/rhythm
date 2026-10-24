@@ -23,7 +23,7 @@ export class PersonalBests {
   }
 
   get(id) {
-    return this.records.get(id) ?? null;
+    return this.records.get(id) ?? legacyChartIds(id).map(alias => this.records.get(alias)).find(Boolean) ?? null;
   }
 
   record(id, result) {
@@ -47,3 +47,5 @@ export class PersonalBests {
     } catch { /* 永続保存できなくてもメモリー上の記録を保持する。 */ }
   }
 }
+import { legacyChartIds } from './difficulties.js';
+

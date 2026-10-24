@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "title": "Chronomia [HD]",
+  "title": "Chronomia",
+  "difficulty": "H",
   "artist": "Lime",
   "bpm": 227,
   "audio": "./audio.mp3",

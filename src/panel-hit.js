@@ -27,9 +27,12 @@ export function intersectPanel(panel, origin, direction, result, maxDistance = 8
   const localX = (da * bb - db * ab) / determinant;
   const localY = (db * aa - da * ab) / determinant;
   if (Math.abs(localX) > panel.width / 2 || Math.abs(localY) > panel.height / 2) return false;
+  const pixelX = (localX / panel.width + 0.5) * panel.canvas.width;
+  const pixelY = (0.5 - localY / panel.height) * panel.canvas.height;
+  if (panel.containsPoint && !panel.containsPoint(pixelX, pixelY)) return false;
   result.panel = panel;
-  result.x = (localX / panel.width + 0.5) * panel.canvas.width;
-  result.y = (0.5 - localY / panel.height) * panel.canvas.height;
+  result.x = pixelX;
+  result.y = pixelY;
   result.point.set(x, y, z);
   result.distance = distance;
   return true;
