@@ -17,6 +17,18 @@ export const EFFECTS = {
 const clone = value => JSON.parse(JSON.stringify(value));
 const collection = kind => ({ note: 'notes', event: 'events', sv: 'svs' })[kind];
 
+export function snapToGrid(seconds, step, origin = 0) {
+  if (!Number.isFinite(seconds) || !Number.isFinite(step) || step <= 0 || !Number.isFinite(origin)) {
+    throw new Error('スナップ間隔には正の数値、時刻と基準位置には有限の数値を指定してください。');
+  }
+  // 曲のオフセットを基準にする。0秒より前のグリッドへ丸めず、最初の有効な位置へ揃える。
+  const firstIndex = Math.ceil(-origin / step - 1e-9);
+  const index = Math.max(firstIndex, Math.round((seconds - origin) / step));
+  const result = Math.max(0, origin + index * step);
+  if (!Number.isFinite(result)) throw new Error('スナップ後の時刻が数値の範囲外です。');
+  return result;
+}
+
 export class ChartDocument {
   constructor(source = { version: 1, title: 'New Song', artist: '', bpm: 120, audio: './audio.ogg', offsetSeconds: 0, durationSeconds: 60, notes: [], events: [] }) {
     normalizeChart(source, { allowEmptyNotes: true });
@@ -149,6 +161,22 @@ export class ChartDocument {
     }, record);
   }
   moveMany(ids, seconds, lanes = 0) { this.moveItems(this.movementOrigins(ids), seconds, lanes); }
+  snapNotes(ids, step, origin = 0) {
+    snapToGrid(0, step, origin);
+    const selected = ids == null ? null : new Set(ids);
+    const notes = this.notes.filter(item => !selected || selected.has(item.id));
+    if (!notes.length) return 0;
+    this.change(() => {
+      for (const item of notes) {
+        const start = snapToGrid(this.time(item), step, origin);
+        const hold = item.data.endTimeSeconds !== undefined || item.data.endBeat !== undefined;
+        const end = hold ? Math.max(start + step, snapToGrid(this.endTime(item), step, origin)) : null;
+        this.setTime(item, start);
+        if (hold) this.setEndTime(item, end);
+      }
+    });
+    return notes.length;
+  }
   removeMany(ids) {
     const selected = new Set(ids);
     this.change(() => {

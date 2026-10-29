@@ -76,7 +76,7 @@ export class AudioManager {
     const oscillator = this.audioContext.createOscillator();
     const gain = this.audioContext.createGain();
     oscillator.frequency.value = strong ? 1760 : 880;
-    gain.gain.setValueAtTime(volume * 0.2, time);
+    gain.gain.setValueAtTime(volume * 0.8, time);
     gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);
     oscillator.connect(gain).connect(this.audioContext.destination);
     oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };

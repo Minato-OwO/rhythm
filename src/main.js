@@ -16,6 +16,8 @@ import { downloadSettings } from './settings-export.js';
 import { ChartNoteSkins } from './chart-note-skins.js';
 import { legacyChartIds } from './difficulties.js';
 import { PlayTransition } from './play-transition.js';
+import { SelectionTransition } from './selection-transition.js';
+import { loadLoadingText } from './loading-text.js';
 import { UISounds, shortcutSound } from './ui-sounds.js';
 
 const storageKey = 'fourflow.settings.v1';
@@ -36,7 +38,10 @@ async function bootstrap() {
   audio.setVolume(settings.volume / 100);
   audio.setHitVolume(settings.hitVolume / 100);
   audio.setAudioOffset(settings.audioOffset);
-  const songs = await loadSongLibrary();
+  const titleLogo = new Image();
+  titleLogo.src = new URL('../assets/title-logo.png', import.meta.url).href;
+  // 最初のタイトル描画までにデコードを終え、ロゴの後出しを防ぐ。
+  const [songs, loadingText] = await Promise.all([loadSongLibrary(), loadLoadingText(), titleLogo.decode()]);
   let savedSong = null;
   try { savedSong = localStorage.getItem('fourflow.song.v1'); } catch { /* 保存不可でも選曲可能。 */ }
   const matchesSaved = difficulty => difficulty.id === savedSong || legacyChartIds(difficulty.id).includes(savedSong);
@@ -62,6 +67,7 @@ async function bootstrap() {
   let ui;
   let vr;
   const playTransition = new PlayTransition(scene, {
+    loadingImage: loadingText.word,
     onActive: active => {
       if (!ui) return;
       ui.inputBlocked = active;
@@ -71,6 +77,17 @@ async function bootstrap() {
       }
     },
     onCovered: () => { if (ui) ui.root.visible = false; },
+    canReveal: () => !ui || ui.screenPhase === 'stable' && ui.screenKey === ui.screenViewKey(),
+  });
+  const selectionTransition = new SelectionTransition(scene, {
+    loadingImage: loadingText.atlas,
+    onActive: active => {
+      if (!ui) return;
+      ui.inputBlocked = active;
+      if (!active) ui.root.visible = true;
+    },
+    onCovered: () => { if (ui) ui.root.visible = false; },
+    onReveal: () => { if (ui) ui.root.visible = true; },
     canReveal: () => !ui || ui.screenPhase === 'stable' && ui.screenKey === ui.screenViewKey(),
   });
   let actionBusy = false;
@@ -147,6 +164,12 @@ async function bootstrap() {
     }
   }
 
+  async function openSongSelection() {
+    if (playTransition.active || selectionTransition.active) return;
+    if (ui.isTitleScreen()) await selectionTransition.run(() => ui.showSongSelection());
+    else ui.showSongSelection();
+  }
+
   async function startSelectedSong() {
     const song = songLibrary.songs.find(item => item.id === songLibrary.selectedId);
     const difficulty = song?.difficulties.find(item => item.id === songLibrary.selectedDifficultyId);
@@ -171,18 +194,18 @@ async function bootstrap() {
 
   const actions = {
     playUISound: name => {
-      if (actionBusy || playTransition.active || ui?.inputBlocked) return;
+      if (actionBusy || playTransition.active || selectionTransition.active || ui?.inputBlocked) return;
       void uiSounds.play(name).catch(() => { /* 次の操作で再試行する。 */ });
     },
     toggle: () => runAction(async () => {
-      if (playTransition.active) return;
+      if (playTransition.active || selectionTransition.active) return;
       if (ui.infoOpen || ui.settingsOpen) return;
       if (ui.songSelectionOpen) { await startSelectedSong(); return; }
-      if (game.state === 'idle') { ui.showSongSelection(); return; }
+      if (game.state === 'idle') { await openSongSelection(); return; }
       if (game.state === 'playing') await game.pause();
       else if (game.state === 'paused') await game.resume();
       else await startSelectedSong();
-    }, { preserveSelectionAppearance: ui?.songSelectionOpen && !ui.settingsOpen }),
+    }, { preserveSelectionAppearance: ui?.isTitleScreen() || ui?.songSelectionOpen && !ui.settingsOpen }),
     startSelected: () => runAction(async () => {
       if (!ui.songSelectionOpen || ui.settingsOpen) return;
       await startSelectedSong();
@@ -192,21 +215,23 @@ async function bootstrap() {
       await game.resume();
     }),
     restart: () => runAction(async () => {
-      if (playTransition.active) return;
-      if (game.state === 'idle') { ui.showSongSelection(); return; }
+      if (playTransition.active || selectionTransition.active) return;
+      if (game.state === 'idle') { await openSongSelection(); return; }
       await game.pause();
       await startSelectedSong();
-    }),
+    }, { preserveSelectionAppearance: ui?.isTitleScreen() }),
     leave: () => runAction(async () => {
       await game.exit();
       ui.showSongSelection();
     }),
     title: () => runAction(async () => {
-      await game.exit();
-      ui.closeInfo();
-      ui.closeSettings(false);
-      ui.closeSongSelection();
-    }),
+      await selectionTransition.run(async () => {
+        await game.exit();
+        ui.closeInfo();
+        ui.closeSettings(false);
+        ui.closeSongSelection();
+      }, { loading: false });
+    }, { preserveSelectionAppearance: true }),
     pause: () => runAction(() => game.pause()),
     previewLaneEffects: () => { if (!actionBusy) view.previewLaneEffects(); },
     settings: () => runAction(async () => {
@@ -215,8 +240,8 @@ async function bootstrap() {
     }),
     songs: () => runAction(async () => {
       await game.pause();
-      ui.showSongSelection();
-    }),
+      await openSongSelection();
+    }, { preserveSelectionAppearance: ui?.isTitleScreen() }),
     refreshSongs: () => runAction(async () => {
       const nextSongs = await loadSongLibrary();
       const song = nextSongs.find(item => item.difficulties.some(difficulty => difficulty.id === songLibrary.selectedDifficultyId)) ?? nextSongs[0];
@@ -346,12 +371,12 @@ async function bootstrap() {
       await game.pause();
     }),
     select: source => ui.selectXR(source),
-    canQuickStart: () => !playTransition.active && !ui.infoOpen && !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
+    canQuickStart: () => !playTransition.active && !selectionTransition.active && !ui.infoOpen && !ui.settingsOpen && !ui.songSelectionOpen && game.state !== 'paused',
     updatePointers: (frame, space, sources) => ui.updateXR(frame, space, sources),
     clearPointers: () => ui.clearXR(),
   };
 
-  ui = new SpatialUI(scene, view, game, settings, actions, songLibrary);
+  ui = new SpatialUI(scene, view, game, settings, actions, songLibrary, titleLogo);
   if (skinLoadError) ui.setMessage(skinLoadError);
   vr = new VRInput(scene, game, view, settings, actions);
   updateChartAnalysis(chart);
@@ -402,6 +427,7 @@ async function bootstrap() {
 
   document.addEventListener('keydown', event => {
     if (event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+    if (selectionTransition.active) { if (event.code === 'Space') event.preventDefault(); return; }
     if (ui.infoOpen) {
       if (event.code === 'Escape') {
         event.preventDefault();
@@ -518,6 +544,7 @@ async function bootstrap() {
       noteSkinTrack.update(game.state === 'playing' || game.state === 'paused' ? songTime : -Infinity);
       view.update(game, now, songTime);
       playTransition.update(now);
+      selectionTransition.update(now);
     },
     remove() {
       scene.removeEventListener('renderstart', this.installLoop);
@@ -526,6 +553,7 @@ async function bootstrap() {
       renderResolution.dispose();
       vr.disconnect();
       playTransition.dispose();
+      selectionTransition.dispose();
       uiSounds.dispose();
       ui.dispose();
       view.disposeText();
@@ -540,6 +568,7 @@ async function bootstrap() {
   scene.setAttribute('four-flow-loop', '');
   window.addEventListener('pagehide', () => {
     playTransition.dispose();
+    selectionTransition.dispose();
     uiSounds.dispose();
     analysisController?.abort();
     vr.disconnect();

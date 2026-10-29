@@ -1,4 +1,4 @@
-import { ChartDocument, EFFECTS, isRangeSV } from './editor/ChartDocument.js';
+import { ChartDocument, EFFECTS, isRangeSV, snapToGrid } from './editor/ChartDocument.js';
 import { ScrollTrack, SpeedTrack, SV_MULTIPLIER_LIMIT } from '../../src/scroll-track.js';
 import { loadSongCatalog } from '../../src/song-library.js';
 import { Timeline } from './editor/Timeline.js';
@@ -90,7 +90,12 @@ function snapStep() {
 }
 function snapTime(seconds) {
   const origin = $('snap-mode').value === 'beat' ? doc.metadata.offsetSeconds ?? 0 : 0;
-  return Math.max(0, origin + Math.round((seconds - origin) / snapStep()) * snapStep());
+  return snapToGrid(seconds, snapStep(), origin);
+}
+function updateSnapButton() {
+  const selection = selectedIds.size > 0;
+  $('btn-snap-notes').textContent = selection ? '選択ノーツをスナップ' : '全ノーツをスナップ';
+  $('btn-snap-notes').disabled = !doc.notes.some(item => !selection || selectedIds.has(item.id));
 }
 function syncPreview() {
   if (previewFrame) return;
@@ -122,6 +127,7 @@ function changed(full = true) {
   const fakeCount = doc.notes.filter(item => item.data.fake).length;
   $('event-count').textContent = doc.events.length + '演出 / ' + (doc.notes.length - fakeCount) + 'ノーツ' + (fakeCount ? '＋' + fakeCount + 'フェイク' : '') + ' / ' + doc.svs.length + 'SV';
   timeline.selection(selectedIds, selected);
+  updateSnapButton();
   if (full) { renderSong(); renderProperties(); renderEventList(); timeline.render(); }
   syncPreview();
 }
@@ -135,6 +141,7 @@ function selectMany(ids, primary = null) {
   selectedIds = new Set([...ids].filter(id => existingIds.has(id)));
   selected = selectedIds.has(primary) ? primary : [...selectedIds].at(-1) ?? null;
   timeline.selection(selectedIds, selected);
+  updateSnapButton();
   for (const row of $('event-list').children) row.classList.toggle('selected', selectedIds.has(row.dataset.id));
   renderProperties();
 }
@@ -180,6 +187,17 @@ function moveSelection(seconds) {
   if (busy || timeline.dragging || !selectedIds.size) return;
   try { doc.moveMany(selectedIds, seconds); changed(); }
   catch (error) { showError(error); }
+}
+function snapExistingNotes() {
+  if (busy || timeline.dragging) return;
+  try {
+    const beat = $('snap-mode').value === 'beat';
+    const count = doc.snapNotes(selectedIds.size ? selectedIds : null, snapStep(), beat ? doc.metadata.offsetSeconds ?? 0 : 0);
+    if (!count) return status('対象のノーツがありません。');
+    changed();
+    const interval = beat ? $('snap-beat-div').selectedOptions[0].textContent : $('snap-ms-val').value + 'ms';
+    status(count + 'ノーツ（LN始点・終点を含む）を最寄りの' + interval + 'グリッドへスナップしました。');
+  } catch (error) { showError(new Error('スナップできませんでした：' + error.message)); }
 }
 
 function field(label, key, value, { type = 'number', step = '0.001', min, max, readonly = false } = {}) {
@@ -670,6 +688,7 @@ function snapChanged() {
 $('snap-mode').onchange = snapChanged;
 $('snap-beat-div').onchange = snapChanged;
 $('snap-ms-val').onchange = snapChanged;
+$('btn-snap-notes').onclick = snapExistingNotes;
 $('metronome-toggle').onchange = event => { engine.metronomeEnabled = event.target.checked; engine.lastScheduledBeat = null; };
 $('metronome-vol').oninput = event => { engine.metronomeVolume = Number(event.target.value); };
 $('menu-dup-event').onclick = () => { duplicateSelection(); $('context-menu').hidden = true; };

@@ -30,13 +30,14 @@ function formatAccuracy(accuracy, bonusAccuracy) {
 
 // メニューも設定もCanvasTextureを貼った3D平面。HTMLオーバーレイは使わない。
 export class SpatialUI {
-  constructor(scene, view, game, settings, actions, songLibrary) {
+  constructor(scene, view, game, settings, actions, songLibrary, titleLogo) {
     this.scene = scene;
     this.view = view;
     this.game = game;
     this.settings = settings;
     this.actions = actions;
     this.songLibrary = songLibrary;
+    this.titleLogo = titleLogo;
     this.songSelectionOpen = false;
     this.songPage = 0;
     this.songSort = 'title';
@@ -83,6 +84,7 @@ export class SpatialUI {
     this.right = this.makePanel('stats', 0.8, 1.03, 768, 990, settings.panelRightX, settings.panelRightY, -settings.panelRightDistance, settings.panelRightYaw * Math.PI / 180);
     this.sidePanels = [this.left, this.right];
     this.center = this.makePanel('menu', 1.42, 1.25, 1100, 968, settings.panelCenterX, settings.panelCenterY, -settings.panelCenterDistance);
+    this.titlePanel = this.makePanel('title', 2.65, 2.65 * 9 / 16, 2048, 1152, settings.panelCenterX, settings.panelCenterY - 0.2, -settings.panelCenterDistance);
     this.details = this.makePanel('details', 1.35, 1.04, 1200, 930, 0, settings.panelCenterY, -settings.panelCenterDistance);
     this.details.mesh.visible = false;
     this.difficultyPanel = this.makePanel('difficulties', 1.35, 0.18, 1200, 160, 0, 0, 0);
@@ -98,7 +100,7 @@ export class SpatialUI {
     });
     this.selectionStage = new SongSelectionStage(T, this.center, this.details, this.songCards, this.difficultyPanel, this.startPanel);
     this.notice = this.makePanel('notice', 1.55, 0.18, 1240, 144, settings.panelCenterX, settings.panelCenterY + 0.8, -settings.panelCenterDistance - 0.05);
-    this.drawOrder = [this.notice, this.center, this.details, this.difficultyPanel, this.startPanel, ...this.songCards, this.right, this.left];
+    this.drawOrder = [this.notice, this.titlePanel, this.center, this.details, this.difficultyPanel, this.startPanel, ...this.songCards, this.right, this.left];
     this.progressFill = this.makeOverlay(this.left, 48, 530, 672, 12, CYAN);
     this.progressLeft = this.progressFill.position.x - this.progressFill.geometry.parameters.width / 2;
     this.keyFlashes = CONFIG.colors.map((color, lane) => this.makeOverlay(this.left, 48 + lane * 172, 637, 156, 76, color, true));
@@ -242,6 +244,7 @@ export class SpatialUI {
     if (wasVisible !== this.busyVisible) this.invalidate();
   }
   setMessage(value) { if (value !== this.message) { this.message = value; this.notice.dirty = true; } }
+  isTitleScreen() { return this.game.state === 'idle' && !this.infoOpen && !this.settingsOpen && !this.songSelectionOpen; }
   showInfo() {
     if (this.busy || this.inputBlocked || this.game.state !== 'idle' || this.settingsOpen || this.songSelectionOpen) return;
     this.infoOpen = true;
@@ -310,6 +313,11 @@ export class SpatialUI {
     const sine = Math.sin(menuYaw);
     this.menuAnchorPosition.copy(this.center.mesh.position);
     this.menuAnchorYaw = menuYaw;
+    if (this.titlePanel) {
+      this.titlePanel.mesh.position.copy(this.menuAnchorPosition);
+      this.titlePanel.mesh.position.y -= 0.2;
+      this.titlePanel.mesh.rotation.set(0, menuYaw, 0);
+    }
     const selectionLayout = this.songSelectionOpen && !this.settingsOpen;
     // 中央の設定位置を2枚全体の中心とする。前後方向の追加補正は入れない。
     const listOffset = selectionLayout ? -(this.details.width + SELECTION_PANEL_GAP) / 2 : 0;
@@ -388,6 +396,7 @@ export class SpatialUI {
   }
 
   panelViewKey(panel) {
+    if (panel === this.titlePanel) return 'title:' + this.scene.is('vr-mode');
     if (panel.songSlot !== undefined) {
       const song = this.selectionSongs()[this.songPage * SONGS_PER_PAGE + panel.songSlot];
       return 'song-card:' + (song?.id ?? 'empty') + ':' + (song?.id === this.songLibrary.selectedId);
@@ -624,11 +633,50 @@ export class SpatialUI {
     panel.texture.needsUpdate = true;
   }
 
-  drawMenu() {
+  drawTitle() {
+    const panel = this.titlePanel;
+    const { ctx, canvas } = panel;
+    const inVR = this.scene.is('vr-mode');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    panel.regions = [];
+    const gradient = ctx.createLinearGradient(0, 0, 2048, 1152);
+    gradient.addColorStop(0, '#101f32');
+    gradient.addColorStop(0.55, '#091321');
+    gradient.addColorStop(1, '#172b40');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 2048, 1152);
+    ctx.save();
+    for (let lane = 0; lane < 4; lane++) {
+      const x = 1170 + lane * 150;
+      ctx.fillStyle = CONFIG.colors[lane];
+      ctx.globalAlpha = 0.06 + lane * 0.025;
+      ctx.beginPath(); ctx.moveTo(x, -100); ctx.lineTo(x + 70, -100);
+      ctx.lineTo(x + 690, 1252); ctx.lineTo(x + 585, 1252); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.65;
+      ctx.fillRect(1330 + lane * 94, 716 - lane * 114, 68, 8);
+    }
+    ctx.restore();
+    this.text(panel, '4KEY / VR RHYTHM', 146, 127, 27, CYAN, 'left', 600);
+    const logoSize = 760;
+    const logoScale = logoSize / Math.max(this.titleLogo.naturalWidth, this.titleLogo.naturalHeight);
+    const logoWidth = this.titleLogo.naturalWidth * logoScale;
+    const logoHeight = this.titleLogo.naturalHeight * logoScale;
+    ctx.drawImage(this.titleLogo, 669 - logoWidth / 2, (logoSize - logoHeight) / 2, logoWidth, logoHeight);
+    this.text(panel, 'Four keys. One flow.', 146, 728, 32, '#a4b9cd');
+    this.selectionButton(panel, 'play', 'プレイする　→', 144, 808, 1050, 110, this.actions.toggle, { primary: true, size: 38 });
+    this.selectionButton(panel, 'settings', '設定', 144, 946, 500, 72, this.actions.settings, { size: 28 });
+    this.selectionButton(panel, 'vr', inVR ? 'VRを終了' : 'VRでプレイ', 670, 946, 524, 72, this.actions.switchVR, { size: 28 });
+    this.selectionButton(panel, 'info', 'Info', 1710, 70, 194, 64, () => this.showInfo(), { size: 28 });
+    this.text(panel, inVR ? 'コントローラーで指して、トリガーで選択' : 'SPACE：プレイする　 /　D・F・J・K：4レーン', 146, 1084, 24, MUTED);
+    this.text(panel, 'FIND YOUR FLOW', 1900, 1037, 23, '#718ba7', 'right', 600);
+    panel.texture.needsUpdate = true;
+  }
+
+  drawResult() {
     const panel = this.center;
     const game = this.game;
     const inVR = this.scene.is('vr-mode');
-    this.background(panel, game.state === 'finished' ? 'TRACK COMPLETE / RESULT' : 'WELCOME TO FOUR FLOW');
+    this.background(panel, 'TRACK COMPLETE / RESULT');
     if (game.state === 'finished') {
       const status = clearStatusForScore(game.score);
       const highClear = status.id === 'highClear';
@@ -646,13 +694,6 @@ export class SpatialUI {
         this.text(panel, count, x, 650, 42, INK, 'center');
       });
       if (game.autoplay) this.text(panel, 'AUTO PLAY / 自己ベストには保存されません', 550, 699, 24, WARNING, 'center');
-    } else {
-      if (game.state === 'idle') this.button(panel, 'info', 'Info', 900, 27, 150, 54, () => this.showInfo());
-      this.text(panel, 'Four keys.', 550, 220, 102, INK, 'center', 500);
-      this.text(panel, 'One flow.', 550, 334, 88, CYAN, 'center', 300);
-      this.text(panel, inVR ? 'レーンに合わせてコントローラーを振り下ろす' : 'ノーツがラインに届いたら D / F / J / K', 550, 471, 31, INK, 'center');
-      this.text(panel, inVR ? 'ボタンをレーザーで指し、トリガーで選択' : '3Dパネルはマウスでクリックできます', 550, 535, 27, MUTED, 'center');
-      this.text(panel, '「プレイする」で選曲画面へ進みます', 550, 594, 27, MUTED, 'center');
     }
     const label = game.state === 'finished' ? this.settings.autoplay ? 'オートプレイで再生' : 'もう一度プレイ' : 'プレイする';
     this.button(panel, 'play', this.busy ? '準備中…' : label, 70, 737, 960, 85, this.actions.toggle, { primary: true });
@@ -1054,15 +1095,17 @@ export class SpatialUI {
       this.anchorDirty = false;
     }
     const fadingOut = this.screenPhase === 'out';
-    const centerVisible = !fadingOut && (this.settingsOpen || this.songSelectionOpen || this.game.state !== 'playing');
+    const titleVisible = !fadingOut && this.isTitleScreen();
+    if (this.titlePanel) this.setPanelVisible(this.titlePanel, titleVisible);
+    const centerVisible = !fadingOut && !this.isTitleScreen() && (this.settingsOpen || this.songSelectionOpen || this.game.state !== 'playing');
     this.setPanelVisible(this.center, centerVisible);
     const selectionVisible = !fadingOut && this.songSelectionOpen && !this.settingsOpen;
     this.setPanelVisible(this.details, selectionVisible);
     if (this.difficultyPanel) this.setPanelVisible(this.difficultyPanel, selectionVisible);
     if (this.startPanel) this.setPanelVisible(this.startPanel, selectionVisible);
     for (const card of this.songCards ?? []) this.setPanelVisible(card, selectionVisible && Boolean(this.selectionSongs()[this.songPage * SONGS_PER_PAGE + card.songSlot]));
-    this.setPanelVisible(this.left, !fadingOut && !selectionVisible);
-    this.setPanelVisible(this.right, !fadingOut && !selectionVisible);
+    this.setPanelVisible(this.left, !fadingOut && !selectionVisible && this.game.state !== 'idle');
+    this.setPanelVisible(this.right, !fadingOut && !selectionVisible && this.game.state !== 'idle');
     this.setPanelVisible(this.notice, !fadingOut && Boolean(this.message));
     this.updateSidePanelFocus(now);
     for (const panel of this.panels) this.updatePanelTransition(panel, now);
@@ -1094,6 +1137,7 @@ export class SpatialUI {
       // 選曲内の変更は表示したまま更新し、別画面への切替は消え切ってから描き直す。
       if (panel.viewKey !== panel.desiredViewKey && panel.opacity > 0 && !this.canUpdatePanelInPlace(panel)) continue;
       if (panel === this.left) this.drawTrack(now);
+      else if (panel === this.titlePanel) this.drawTitle();
       else if (panel === this.right) this.drawStats();
       else if (panel === this.details) this.drawSongDetails();
       else if (panel === this.difficultyPanel) this.drawDifficultySelection();
@@ -1104,7 +1148,7 @@ export class SpatialUI {
         else if (this.settingsOpen) this.drawSettings();
         else if (this.songSelectionOpen) this.drawSongSelection();
         else if (this.game.state === 'paused') this.drawPause();
-        else this.drawMenu();
+        else this.drawResult();
       }
       else this.drawNotice();
       panel.dirty = false;

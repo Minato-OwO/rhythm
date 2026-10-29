@@ -1,4 +1,5 @@
 import { DIFFICULTIES } from './difficulties.js';
+import { measureOverlayViewport } from './overlay-viewport.js';
 
 export const PLAY_TRANSITION_TIMING = Object.freeze({ enterMs: 520, minimumHoldMs: 5000, exitMs: 420 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -13,8 +14,9 @@ const deferred = () => {
 
 // カメラ前の3D面で左右両眼を覆う。演奏の時計とは独立し、音声再生前に読込を完了する。
 export class PlayTransition {
-  constructor(scene, { onActive = () => {}, onCovered = () => {}, canReveal = () => true, now = () => performance.now() } = {}) {
+  constructor(scene, { loadingImage, onActive = () => {}, onCovered = () => {}, canReveal = () => true, now = () => performance.now() } = {}) {
     this.scene = scene;
+    this.loadingImage = loadingImage;
     this.now = now;
     this.onActive = onActive;
     this.onCovered = onCovered;
@@ -123,7 +125,11 @@ export class PlayTransition {
     ctx.strokeRect(560, 520, 480, 104);
     text(definition ? definition.code + ' / ' + definition.label : '4 KEY', 571, 44, definition?.color ?? '#43ddff', 600);
     if (Number.isFinite(level)) text('Lv. ' + level, 669, 27, '#a4b9cd');
-    text('Loading', 790, 30, '#cad8e9');
+    if (this.loadingImage) {
+      const width = this.loadingImage.width * 30 / 64;
+      const height = this.loadingImage.height * 30 / 64;
+      ctx.drawImage(this.loadingImage, 800 - width / 2, 790 - height / 2, width, height);
+    } else text('Loading', 790, 30, '#cad8e9');
     this.contentTexture.needsUpdate = true;
   }
 
@@ -176,19 +182,8 @@ export class PlayTransition {
   }
 
   layout() {
-    let halfWidth = 0.5, halfHeight = 0.5;
-    const xr = this.scene.renderer?.xr;
-    const camera = xr?.isPresenting ? xr.getCamera?.() ?? this.scene.camera : this.scene.camera;
-    const cameras = camera?.cameras?.length ? camera.cameras : [camera];
-    for (const view of cameras) {
-      const p = view?.projectionMatrix?.elements;
-      if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[5]) || !p[0] || !p[5]) continue;
-      halfWidth = Math.max(halfWidth, DISTANCE * (1 + Math.abs(p[8] ?? 0)) / Math.abs(p[0]));
-      halfHeight = Math.max(halfHeight, DISTANCE * (1 + Math.abs(p[9] ?? 0)) / Math.abs(p[5]));
-    }
-    // 眼間距離と非対称なXR投影の余白も含め、両眼の端まで覆う。
-    const width = 2 * halfWidth * 1.15 + 0.16;
-    const height = 2 * halfHeight * 1.15 + 0.16;
+    measureOverlayViewport(this.scene, DISTANCE, this);
+    const { width, height } = this;
     this.background.scale.set(width, height, 1);
     const contentHeight = CONTENT_SCALE * Math.min(height * 0.78, width * 0.76 / 1.6);
     this.content.scale.set(contentHeight, contentHeight, 1);

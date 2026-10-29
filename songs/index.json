@@ -49,7 +49,7 @@
       "title": "Dogbite [X]",
       "artist": "t+pazolite",
       "difficulty": "X",
-      "flashWarning": false,
+      "flashWarning": true,
       "flashWarningText": "",
       "level": null,
       "bpm": 195,

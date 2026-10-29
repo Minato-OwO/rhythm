@@ -1,0 +1,30 @@
+{
+  "font": "MoonyArc",
+  "fontSize": 64.0,
+  "width": 640,
+  "rowHeight": 144,
+  "baseline": 91.2,
+  "glyphPositions": [
+    24.0,
+    83.6,
+    124.256,
+    165.232,
+    207.808,
+    217.42399999999998,
+    258.784,
+    300.08,
+    340.736
+  ],
+  "states": [
+    "Loading",
+    "Coading",
+    "Coading",
+    "Comding",
+    "Comping",
+    "Complng",
+    "Compleg",
+    "Complet",
+    "Complete",
+    "Completed"
+  ]
+}
