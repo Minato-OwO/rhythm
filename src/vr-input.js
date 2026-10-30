@@ -133,7 +133,8 @@ export class VRInput {
       this.tip.z += p.z;
       this.tip.applyMatrix4(this.trackingToLane);
       const contactLane = laneAt(this.tip.x);
-      const touching = Math.abs(this.tip.z - CONFIG.hitZ) <= CONFIG.swing.depthTolerance
+      // 見えている判定パッドの前後の端を、そのまま入力範囲に使う。
+      const touching = Math.abs(this.tip.z - CONFIG.hitZ) <= CONFIG.hitPadDepth / 2
         && this.tip.y >= CONFIG.hitPlaneY - CONFIG.hold.belowPlane
         && this.tip.y <= CONFIG.hitPlaneY + CONFIG.hold.abovePlane;
       for (let lane = 0; lane < 4; lane++) this.game.setHeld(lane, touching && lane === contactLane, source.handedness, songTime);
@@ -156,7 +157,7 @@ export class VRInput {
           const x = hand.previous.x + (this.tip.x - hand.previous.x) * alpha;
           const z = hand.previous.z + (this.tip.z - hand.previous.z) * alpha;
           const lane = laneAt(x);
-          if (lane !== -1 && Math.abs(z - CONFIG.hitZ) <= CONFIG.swing.depthTolerance) {
+          if (lane !== -1 && Math.abs(z - CONFIG.hitZ) <= CONFIG.hitPadDepth / 2) {
             hand.lastSwing = now;
             const hitTime = hand.songTime + (songTime - hand.songTime) * alpha;
             if (!this.game.autoplay) this.view.flash(lane);
