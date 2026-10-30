@@ -11,6 +11,8 @@ export class StageView {
     this.settings = settings;
     this.THREE = AFRAME.THREE;
     const T = this.THREE;
+    // VR入場・正面合わせ時の目線を保存し、通常の頭の動きには追従させない。
+    this.eyePosition = new T.Vector3(0, CONFIG.vrEyeHeight, 0);
     this.root = new T.Group();
     // 正面合わせの基準と、レーン自体の前後・傾きを分ける。
     this.laneRoot = new T.Group();
@@ -121,21 +123,25 @@ export class StageView {
     this.scene.object3D.add(this.environment);
   }
 
-  recenter() {
+  recenter(trackedEyeHeight = null) {
     if (!this.scene.is('vr-mode')) return;
     this.scene.camera.getWorldPosition(this.cameraPosition);
     this.scene.camera.getWorldDirection(this.cameraDirection);
     this.cameraDirection.y = 0;
-    if (this.cameraDirection.lengthSq() < 0.01) return;
+    if (this.cameraDirection.lengthSq() < 0.01) {
+      this.cameraDirection.set(-Math.sin(this.root.rotation.y), 0, -Math.cos(this.root.rotation.y));
+    }
     this.cameraDirection.normalize();
     // 前回の後退分を除いた追跡位置を、レーン配置の基準にする。
     this.cameraPosition.sub(this.vrPositionOffset);
+    if (Number.isFinite(trackedEyeHeight)) this.cameraPosition.y = trackedEyeHeight;
+    this.eyePosition.copy(this.cameraPosition);
     this.trackingRig.position.sub(this.vrPositionOffset);
     this.vrPositionOffset.copy(this.cameraDirection).multiplyScalar(-CONFIG.vrBackOffset);
     // 共通rigを水平に後退させ、視点・両手表示・振り判定を一緒に移動する。
     this.trackingRig.position.add(this.vrPositionOffset);
     this.trackingRig.updateMatrixWorld(true);
-    this.root.position.set(this.cameraPosition.x, this.settings.height, this.cameraPosition.z);
+    this.root.position.set(this.eyePosition.x, this.eyePosition.y + this.settings.height - CONFIG.hitPlaneY, this.eyePosition.z);
     this.root.rotation.y = Math.atan2(-this.cameraDirection.x, -this.cameraDirection.z);
     this.root.updateMatrixWorld(true);
   }
@@ -144,7 +150,8 @@ export class StageView {
     this.trackingRig.position.sub(this.vrPositionOffset);
     this.vrPositionOffset.set(0, 0, 0);
     this.trackingRig.updateMatrixWorld(true);
-    this.root.position.set(0, this.settings.height, 0);
+    this.eyePosition.set(0, CONFIG.vrEyeHeight, 0);
+    this.root.position.set(0, this.eyePosition.y + this.settings.height - CONFIG.hitPlaneY, 0);
     this.root.rotation.set(0, 0, 0);
     this.root.updateMatrixWorld(true);
   }
@@ -164,7 +171,8 @@ export class StageView {
     const offsetZ = this.settings.laneOffsetZ ?? 0;
     const sine = Math.sin(pitch);
     const cosine = Math.cos(pitch);
-    this.root.position.y = this.settings.height;
+    // 設定の0mは目線と同じ高さ。パッド上面のローカル高さを相殺する。
+    this.root.position.y = this.eyePosition.y + this.settings.height - CONFIG.hitPlaneY;
     // 描画とVR入力が共有する座標系を縮め、見た目と判定範囲を揃える。
     this.laneRoot.scale.x = this.settings.laneWidthScale ?? 1;
     this.laneRoot.rotation.x = pitch;

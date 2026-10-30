@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   hitVolume: 67,
   offset: 0,
   audioOffset: 0,
-  height: 1.05,
+  height: -0.58,
   laneWidthScale: 1,
   laneOffsetZ: 0.16,
   lanePitch: 4,
@@ -64,15 +64,15 @@ export const DEFAULT_SETTINGS = Object.freeze({
   laneEffectStrength: 60,
   laneEffectDuration: 280,
   panelLeftX: -1.14,
-  panelLeftY: 1.51,
+  panelLeftY: -0.14,
   panelLeftDistance: 1.35,
   panelLeftYaw: 55,
   panelRightX: 1.14,
-  panelRightY: 1.51,
+  panelRightY: -0.14,
   panelRightDistance: 1.35,
   panelRightYaw: -55,
   panelCenterX: 0,
-  panelCenterY: 1.87,
+  panelCenterY: 0.22,
   panelCenterDistance: 2.10,
   panelCenterYaw: 0,
   panelOffsetX: 0,
@@ -91,7 +91,7 @@ export const PLAY_SETTING_DEFINITIONS = Object.freeze([
 ]);
 
 export const LANE_SETTING_DEFINITIONS = Object.freeze([
-  { key: 'height', label: '判定面の高さ', min: 0.55, max: 1.4, step: 0.01, unit: ' m', digits: 2 },
+  { key: 'height', label: '判定面の高さ（目線基準）', min: -1.5, max: 0.5, step: 0.01, unit: ' m', digits: 2 },
   { key: 'laneWidthScale', label: 'レーン全体の幅（小さいほど狭い）', min: 0.5, max: 1.5, step: 0.05, unit: '×', digits: 2 },
   { key: 'laneOffsetZ', label: 'レーンの前後位置（−奥 / ＋手前）', min: -3, max: 3, step: 0.01, unit: ' m', digits: 2 },
   { key: 'lanePitch', label: 'レーンの傾き（＋で奥を上げる）', min: -30, max: 75, step: 1, unit: '°', digits: 0 },
@@ -120,7 +120,7 @@ export const PANEL_GROUPS = Object.freeze([
 
 export const PANEL_SETTING_DEFINITIONS = Object.freeze(PANEL_GROUPS.flatMap(group => [
   { key: `${group.prefix}X`, label: '左右位置（−左 / ＋右）', min: group.xMin, max: group.xMax, step: 0.01, unit: ' m', digits: 2 },
-  { key: `${group.prefix}Y`, label: '高さ', min: 0.65, max: 2.4, step: 0.01, unit: ' m', digits: 2 },
+  { key: `${group.prefix}Y`, label: '目線からの高さ（−下 / ＋上）', min: -1, max: 0.75, step: 0.01, unit: ' m', digits: 2 },
   { key: `${group.prefix}Distance`, label: '前後の距離（小さいほど手前）', min: group.id === 'menu' ? 1.1 : 0.85, max: 3, step: 0.01, unit: ' m', digits: 2 },
   { key: `${group.prefix}Yaw`, label: '向き（左右の角度）', min: -85, max: 85, step: 1, unit: '°', digits: 0 },
 ]));

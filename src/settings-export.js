@@ -6,7 +6,8 @@ export function createSettingsExport(settings, now = new Date()) {
   for (const key of Object.keys(DEFAULT_SETTINGS)) values[key] = settings[key] ?? DEFAULT_SETTINGS[key];
   return {
     format: 'fourflow-settings',
-    version: 1,
+    version: 2,
+    heightReference: 'eye',
     exportedAt: now.toISOString(),
     settings: values,
   };
