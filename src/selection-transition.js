@@ -1,4 +1,4 @@
-import { measureOverlayViewport } from './overlay-viewport.js';
+import { OverlayAnchor } from './overlay-viewport.js';
 
 export const SELECTION_TRANSITION_TIMING = Object.freeze({ enterMs: 420, loadingMs: 2800, letterMs: 55, completeMs: 700, exitMs: 650 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -110,9 +110,7 @@ export class SelectionTransition {
     this.mesh.renderOrder = 21000;
     this.mesh.frustumCulled = false;
     this.root.add(this.mesh);
-    this.attachCamera = () => scene.camera?.add(this.root);
-    this.attachCamera();
-    scene.addEventListener('camera-set-active', this.attachCamera);
+    this.anchor = new OverlayAnchor(scene, this.root);
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -135,6 +133,7 @@ export class SelectionTransition {
     this.showLoading = loading;
     this.uniforms.uLoading.value = loading ? 1 : 0;
     this.uniforms.uProgress.value = this.uniforms.uStatusStep.value = 0;
+    this.anchor.capture();
     this.root.visible = true;
     this.onActive(true);
     this.update(this.startedAt);
@@ -184,7 +183,7 @@ export class SelectionTransition {
         this.finished.resolve(true);
       }
     }
-    measureOverlayViewport(this.scene, DISTANCE, this);
+    this.anchor.measure(DISTANCE, this);
     this.mesh.scale.set(this.width, this.height, 1);
     this.uniforms.uViewportScale.value.set(this.width / this.viewWidth, this.height / this.viewHeight);
     const aspect = this.viewWidth / this.viewHeight;
@@ -211,7 +210,7 @@ export class SelectionTransition {
     if (this.disposed) return;
     this.disposed = true;
     this.cancel();
-    this.scene.removeEventListener('camera-set-active', this.attachCamera);
+    this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();
     this.resources.clear();

@@ -1,5 +1,5 @@
 import { DIFFICULTIES } from './difficulties.js';
-import { measureOverlayViewport } from './overlay-viewport.js';
+import { OverlayAnchor } from './overlay-viewport.js';
 
 export const PLAY_TRANSITION_TIMING = Object.freeze({ enterMs: 520, minimumHoldMs: 5000, exitMs: 420 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -12,7 +12,7 @@ const deferred = () => {
   return { promise, resolve };
 };
 
-// カメラ前の3D面で左右両眼を覆う。演奏の時計とは独立し、音声再生前に読込を完了する。
+// 視点の前に3D面を表示する。VRでは表示位置を固定し、音声再生前に読込を完了する。
 export class PlayTransition {
   constructor(scene, { loadingImage, onActive = () => {}, onCovered = () => {}, canReveal = () => true, now = () => performance.now() } = {}) {
     this.scene = scene;
@@ -57,9 +57,7 @@ export class PlayTransition {
       this.content.add(dot);
       return dot;
     });
-    this.attachCamera = () => this.scene.camera?.add(this.root);
-    this.attachCamera();
-    scene.addEventListener('camera-set-active', this.attachCamera);
+    this.anchor = new OverlayAnchor(scene, this.root);
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -145,6 +143,7 @@ export class PlayTransition {
     this.drawContent(info);
     this.content.material.opacity = 0;
     this.background.material.opacity = 1;
+    this.anchor.capture();
     this.root.visible = true;
     this.onActive(true);
     this.update(this.startedAt);
@@ -182,7 +181,7 @@ export class PlayTransition {
   }
 
   layout() {
-    measureOverlayViewport(this.scene, DISTANCE, this);
+    this.anchor.measure(DISTANCE, this);
     const { width, height } = this;
     this.background.scale.set(width, height, 1);
     const contentHeight = CONTENT_SCALE * Math.min(height * 0.78, width * 0.76 / 1.6);
@@ -232,7 +231,7 @@ export class PlayTransition {
     if (this.active) this.onActive(false);
     this.phase = 'idle';
     this.root.visible = false;
-    this.scene.removeEventListener('camera-set-active', this.attachCamera);
+    this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();
     this.resources.clear();

@@ -1008,10 +1008,10 @@ export class SpatialUI {
       PLAY_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 218 + index * 90, true));
       this.text(panel, '音声 ＋：遅く / −：早く　入力 ＋：過去へ補正', 70, 851, 21, MUTED);
     } else if (this.settingsTab === 'lanes') {
-      this.text(panel, '判定ラインを基準に位置・傾きを調整します', 70, 204, 24, MUTED);
-      LANE_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 250 + index * 108));
-      this.text(panel, '前後の＋：手前へ移動 / 傾きの＋：奥を上げる', 70, 672, 24, MUTED);
-      this.text(panel, '下地の透明度：0% 不透明 / 100% 透明（自動保存）', 70, 721, 24, MUTED);
+      this.text(panel, '高さ・横幅・位置・傾きを調整（自動保存）', 70, 204, 24, MUTED);
+      LANE_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 250 + index * 90, true));
+      this.text(panel, '幅 1.00×：標準 / 0.50×：半分 / 1.50×：1.5倍', 70, 710, 22, MUTED);
+      this.text(panel, '下地の透明度：0% 不透明 / 100% 透明', 70, 748, 22, MUTED);
       this.button(panel, 'reset-lanes', 'レーン配置をリセット', 70, 782, 960, 63, this.actions.resetLaneLayout);
     } else if (this.settingsTab === 'gauges') {
       this.text(panel, '左右のバーの長さを個別に調整（自動保存）', 70, 204, 24, MUTED);
