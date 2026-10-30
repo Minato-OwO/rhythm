@@ -1,6 +1,7 @@
 import { DIFFICULTIES } from './difficulties.js';
 import { OverlayAnchor } from './overlay-viewport.js';
 import { ScreenBlackout } from './screen-blackout.js';
+import { ScreenFill } from './screen-fill.js';
 
 export const PLAY_TRANSITION_TIMING = Object.freeze({ enterMs: 520, minimumHoldMs: 5000, exitMs: 420 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -61,6 +62,7 @@ export class PlayTransition {
     });
     this.anchor = new OverlayAnchor(scene, this.root);
     this.blackout = new ScreenBlackout(scene);
+    this.surround = new ScreenFill(scene, { color: '#0b1627', renderOrder: 19999 });
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -146,6 +148,7 @@ export class PlayTransition {
     this.drawContent(info);
     this.content.material.opacity = 0;
     this.background.material.opacity = 1;
+    this.surround.setOpacity(0);
     this.anchor.capture();
     this.root.visible = true;
     this.onActive(true);
@@ -179,12 +182,13 @@ export class PlayTransition {
     if (!failed) {
       this.phase = 'blackout';
       this.blackout.begin(this.now(), {
-        onCovered: () => { this.root.visible = false; },
+        onCovered: () => { this.root.visible = false; this.surround.setOpacity(0); },
         onReveal: this.onReveal,
       });
       return;
     }
     this.exitFrom = this.slide;
+    this.surroundFrom = this.surround.opacity;
     this.exitTarget = -1;
     this.startedAt = this.now();
     this.exitStarted = this.coveredAt === null || this.canReveal();
@@ -214,6 +218,7 @@ export class PlayTransition {
     if (this.phase === 'enter') {
       const p = Math.max(0, Math.min(1, (now - this.startedAt) / timing.enterMs));
       this.slide = -1 + easeOutCubic(p);
+      this.surround.setOpacity(easeOutCubic(p));
       if (p === 1) {
         this.phase = 'loading';
         this.coveredAt = now;
@@ -228,6 +233,7 @@ export class PlayTransition {
       }
       const p = this.exitStarted ? Math.max(0, Math.min(1, (now - this.startedAt) / timing.exitMs)) : 0;
       this.slide = this.exitFrom + (this.exitTarget - this.exitFrom) * easeOutCubic(p);
+      this.surround.setOpacity(this.surroundFrom * (1 - easeOutCubic(p)));
       if (p === 1 && (this.coveredAt === null || this.canReveal())) {
         this.phase = 'idle';
         this.root.visible = false;
@@ -251,6 +257,7 @@ export class PlayTransition {
     this.phase = 'idle';
     this.root.visible = false;
     this.blackout.dispose();
+    this.surround.dispose();
     this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();
