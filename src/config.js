@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   offset: 0,
   audioOffset: 0,
   height: 1.05,
+  laneWidthScale: 1,
   laneOffsetZ: 0.16,
   lanePitch: 4,
   laneCoverTransparency: 51,
@@ -87,9 +88,10 @@ export const PLAY_SETTING_DEFINITIONS = Object.freeze([
 ]);
 
 export const LANE_SETTING_DEFINITIONS = Object.freeze([
+  { key: 'height', label: 'レーンの高さ', min: 0.55, max: 1.4, step: 0.01, unit: ' m', digits: 2 },
+  { key: 'laneWidthScale', label: 'レーン全体の幅（小さいほど狭い）', min: 0.5, max: 1.5, step: 0.05, unit: '×', digits: 2 },
   { key: 'laneOffsetZ', label: 'レーンの前後位置（−奥 / ＋手前）', min: -3, max: 3, step: 0.01, unit: ' m', digits: 2 },
   { key: 'lanePitch', label: 'レーンの傾き（＋で奥を上げる）', min: -30, max: 75, step: 1, unit: '°', digits: 0 },
-  { key: 'height', label: '判定面の高さ', min: 0.55, max: 1.4, step: 0.01, unit: ' m', digits: 2 },
   { key: 'laneCoverTransparency', label: '黒い下地の透明度', min: 0, max: 100, step: 1, unit: '%', digits: 0 },
 ]);
 

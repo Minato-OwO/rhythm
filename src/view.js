@@ -165,6 +165,8 @@ export class StageView {
     const sine = Math.sin(pitch);
     const cosine = Math.cos(pitch);
     this.root.position.y = this.settings.height;
+    // 描画とVR入力が共有する座標系を縮め、見た目と判定範囲を揃える。
+    this.laneRoot.scale.x = this.settings.laneWidthScale ?? 1;
     this.laneRoot.rotation.x = pitch;
     // ノーツ中心の判定ラインを回転軸にし、傾きを変えても判定高さを保つ。
     this.laneRoot.position.set(
