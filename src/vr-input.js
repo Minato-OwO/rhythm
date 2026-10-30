@@ -1,4 +1,35 @@
-import { CONFIG, laneAt } from './config.js';
+import { CONFIG, laneAt, laneX } from './config.js';
+
+// 前後・左右の境界へ入った時刻を求め、1フレームで通り抜けたレーンも拾う。
+function slideEntry(previous, current, lane) {
+  let enter = -Infinity, exit = Infinity;
+  const dx = current.x - previous.x;
+  const left = laneX(lane) - CONFIG.laneWidth / 2;
+  const right = laneX(lane) + CONFIG.laneWidth / 2;
+  if (dx === 0) {
+    if (previous.x < left || previous.x > right) return null;
+  } else {
+    const a = (left - previous.x) / dx;
+    const b = (right - previous.x) / dx;
+    enter = Math.max(enter, Math.min(a, b));
+    exit = Math.min(exit, Math.max(a, b));
+  }
+  const dz = current.z - previous.z;
+  const back = CONFIG.hitZ - CONFIG.hitPad.depth / 2;
+  const front = CONFIG.hitZ + CONFIG.hitPad.depth / 2;
+  if (dz === 0) {
+    if (previous.z < back || previous.z > front) return null;
+  } else {
+    const a = (back - previous.z) / dz;
+    const b = (front - previous.z) / dz;
+    enter = Math.max(enter, Math.min(a, b));
+    exit = Math.min(exit, Math.max(a, b));
+  }
+  // 既にレーン内にある手や、判定面より上を横切る手では発火しない。
+  if (enter <= 0 || enter > 1 || enter > exit) return null;
+  if (previous.y + (current.y - previous.y) * enter > CONFIG.hitPlaneY) return null;
+  return enter;
+}
 
 export class VRInput {
   constructor(scene, game, view, settings, actions) {
@@ -85,7 +116,7 @@ export class VRInput {
         stickDown: false,
         sampleTime: 0,
         songTime: 0,
-        lastSwing: -Infinity,
+        lastHits: new Float64Array(CONFIG.keys.length).fill(-Infinity),
       });
     }
     return this.hands.get(source);
@@ -133,9 +164,8 @@ export class VRInput {
       this.tip.z += p.z;
       this.tip.applyMatrix4(this.trackingToLane);
       const contactLane = laneAt(this.tip.x);
-      // 前後・上下とも見えている判定パッドの内側だけを接触範囲にする。
+      // 前後・左右はパッドに合わせ、判定面以下では深さによらず接触を保つ。
       const touching = Math.abs(this.tip.z - CONFIG.hitZ) <= CONFIG.hitPad.depth / 2
-        && this.tip.y >= CONFIG.hitPad.centerY - CONFIG.hitPad.height / 2
         && this.tip.y <= CONFIG.hitPlaneY;
       for (let lane = 0; lane < 4; lane++) this.game.setHeld(lane, touching && lane === contactLane, source.handedness, songTime);
       const dt = now - hand.sampleTime;
@@ -151,27 +181,39 @@ export class VRInput {
       if (crossesPlane && hand.armed) {
         hand.armed = false;
         const downwardSpeed = (hand.previous.y - this.tip.y) / dt;
-        if (downwardSpeed >= this.settings.swing && now - hand.lastSwing >= CONFIG.swing.cooldownSeconds) {
+        if (downwardSpeed >= this.settings.swing) {
           // 1フレーム内の通過位置・通過時刻を線形補間し、高速な振りを取りこぼさない。
           const alpha = (hand.previous.y - CONFIG.hitPlaneY) / (hand.previous.y - this.tip.y);
           const x = hand.previous.x + (this.tip.x - hand.previous.x) * alpha;
           const z = hand.previous.z + (this.tip.z - hand.previous.z) * alpha;
           const lane = laneAt(x);
           if (lane !== -1 && Math.abs(z - CONFIG.hitZ) <= CONFIG.hitPad.depth / 2) {
-            hand.lastSwing = now;
-            const hitTime = hand.songTime + (songTime - hand.songTime) * alpha;
-            if (!this.game.autoplay) this.view.flash(lane);
-            const rating = this.game.hit(lane, hitTime, source.handedness);
-            if (rating) {
-              const actuator = source.gamepad?.hapticActuators?.[0];
-              if (actuator?.pulse) {
-                try { Promise.resolve(actuator.pulse(rating === 'perfectPlus' || rating === 'perfect' ? 0.5 : 0.28, 35)).catch(() => {}); } catch { /* 任意の触覚フィードバック。 */ }
-              }
-            }
+            this.hit(source, hand, lane, alpha, now, songTime);
           }
         }
       }
+      const direction = this.tip.x < hand.previous.x ? -1 : 1;
+      for (let lane = direction > 0 ? 0 : CONFIG.keys.length - 1; lane >= 0 && lane < CONFIG.keys.length; lane += direction) {
+        const alpha = slideEntry(hand.previous, this.tip, lane);
+        if (alpha !== null) this.hit(source, hand, lane, alpha, now, songTime);
+      }
       this.saveSample(hand, now, songTime);
+    }
+  }
+
+  hit(source, hand, lane, alpha, now, songTime) {
+    const inputTime = hand.sampleTime + (now - hand.sampleTime) * alpha;
+    // 隣のレーンへの横滑りを妨げず、同じレーンの重複入力を抑える。
+    if (inputTime - hand.lastHits[lane] < CONFIG.swing.cooldownSeconds) return;
+    hand.lastHits[lane] = inputTime;
+    const hitTime = hand.songTime + (songTime - hand.songTime) * alpha;
+    if (!this.game.autoplay) this.view.flash(lane);
+    const rating = this.game.hit(lane, hitTime, source.handedness);
+    if (rating) {
+      const actuator = source.gamepad?.hapticActuators?.[0];
+      if (actuator?.pulse) {
+        try { Promise.resolve(actuator.pulse(rating === 'perfectPlus' || rating === 'perfect' ? 0.5 : 0.28, 35)).catch(() => {}); } catch { /* 任意の触覚フィードバック。 */ }
+      }
     }
   }
 

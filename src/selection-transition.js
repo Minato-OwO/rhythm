@@ -1,5 +1,6 @@
 import { OverlayAnchor } from './overlay-viewport.js';
 import { ScreenBlackout } from './screen-blackout.js';
+import { ScreenFill } from './screen-fill.js';
 
 export const SELECTION_TRANSITION_TIMING = Object.freeze({ enterMs: 420, loadingMs: 2800, letterMs: 55, completeMs: 700 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -113,6 +114,7 @@ export class SelectionTransition {
     this.root.add(this.mesh);
     this.anchor = new OverlayAnchor(scene, this.root);
     this.blackout = new ScreenBlackout(scene);
+    this.surround = new ScreenFill(scene, { color: '#0a1424', renderOrder: 20999 });
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -136,6 +138,7 @@ export class SelectionTransition {
     this.uniforms.uProgress.value = this.uniforms.uStatusStep.value = 0;
     this.anchor.capture();
     this.root.visible = loading;
+    this.surround.setOpacity(0);
     if (!loading) {
       // タイトルへ戻るときはワイプを出さず、完全な暗転中に画面を切り替える。
       this.blackout.begin(this.startedAt, {
@@ -171,6 +174,7 @@ export class SelectionTransition {
     if (this.phase === 'enter') {
       const progress = clamp((now - this.startedAt) / timing.enterMs);
       this.uniforms.uCover.value = outCubic(progress);
+      this.surround.setOpacity(outCubic(progress));
       if (progress === 1) {
         this.phase = 'loading'; this.startedAt = now;
         this.onCovered();
@@ -204,7 +208,7 @@ export class SelectionTransition {
   reveal(now) {
     this.phase = 'blackout';
     this.blackout.begin(now, {
-      onCovered: () => { this.root.visible = false; },
+      onCovered: () => { this.root.visible = false; this.surround.setOpacity(0); },
       onReveal: this.onReveal,
     });
   }
@@ -213,6 +217,7 @@ export class SelectionTransition {
     this.entry?.resolve(false); this.finished?.resolve(false);
     const wasActive = this.active;
     this.blackout.cancel();
+    this.surround.setOpacity(0);
     this.phase = 'idle'; this.root.visible = false;
     if (wasActive) this.onActive(false);
   }
@@ -221,6 +226,7 @@ export class SelectionTransition {
     this.disposed = true;
     this.cancel();
     this.blackout.dispose();
+    this.surround.dispose();
     this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();
