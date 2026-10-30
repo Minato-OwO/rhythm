@@ -14,6 +14,7 @@ export const CONFIG = Object.freeze({
   laneSurfaceY: -0.018,
   laneSurfaceHeight: 0.014,
   hitZ: -0.65,
+  hitPadDepth: 0.25,
   hitPlaneY: 0.07,
   // 距離と表示時間を同じ倍率で延ばし、流れる速さを保って奥から見せる。
   laneDepth: 15,
@@ -32,7 +33,6 @@ export const CONFIG = Object.freeze({
   swing: {
     tipOffset: [0, 0, -0.14],
     rearmHeight: 0.12,
-    depthTolerance: 0.23,
     cooldownSeconds: 0.1,
     maxSampleGapSeconds: 0.1,
     maxSampleDistance: 0.65,
@@ -88,7 +88,7 @@ export const PLAY_SETTING_DEFINITIONS = Object.freeze([
 ]);
 
 export const LANE_SETTING_DEFINITIONS = Object.freeze([
-  { key: 'height', label: 'レーンの高さ', min: 0.55, max: 1.4, step: 0.01, unit: ' m', digits: 2 },
+  { key: 'height', label: '判定面の高さ', min: 0.55, max: 1.4, step: 0.01, unit: ' m', digits: 2 },
   { key: 'laneWidthScale', label: 'レーン全体の幅（小さいほど狭い）', min: 0.5, max: 1.5, step: 0.05, unit: '×', digits: 2 },
   { key: 'laneOffsetZ', label: 'レーンの前後位置（−奥 / ＋手前）', min: -3, max: 3, step: 0.01, unit: ' m', digits: 2 },
   { key: 'lanePitch', label: 'レーンの傾き（＋で奥を上げる）', min: -30, max: 75, step: 1, unit: '°', digits: 0 },

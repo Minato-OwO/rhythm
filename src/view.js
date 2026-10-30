@@ -79,7 +79,7 @@ export class StageView {
       const x = laneX(lane);
       this.box(CONFIG.laneWidth, CONFIG.laneSurfaceHeight, CONFIG.laneDepth + 0.2, '#101d30', x, CONFIG.laneSurfaceY, centerZ, 0.92);
       const edge = this.box(0.008, 0.007, CONFIG.laneDepth, CONFIG.colors[lane], x - CONFIG.laneSpacing / 2, 0, centerZ, 0.2);
-      const pad = this.box(CONFIG.laneWidth, 0.025, 0.25, CONFIG.colors[lane], x, 0.01, CONFIG.hitZ, 0.28);
+      const pad = this.box(CONFIG.laneWidth, 0.025, CONFIG.hitPadDepth, CONFIG.colors[lane], x, 0.01, CONFIG.hitZ, 0.28);
       this.pads.push(pad);
       const line = this.box(CONFIG.laneWidth, 0.01, 0.018, CONFIG.colors[lane], x, 0.031, CONFIG.hitZ);
       this.laneAccents[lane].push(edge, pad, line);
