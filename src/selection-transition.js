@@ -1,6 +1,7 @@
 import { OverlayAnchor } from './overlay-viewport.js';
+import { ScreenBlackout } from './screen-blackout.js';
 
-export const SELECTION_TRANSITION_TIMING = Object.freeze({ enterMs: 420, loadingMs: 2800, letterMs: 55, completeMs: 700, exitMs: 650 });
+export const SELECTION_TRANSITION_TIMING = Object.freeze({ enterMs: 420, loadingMs: 2800, letterMs: 55, completeMs: 700 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
 const COMPLETE_TEXT = 'Completed';
 const STATUS_WIDTH = 640;
@@ -111,6 +112,7 @@ export class SelectionTransition {
     this.mesh.frustumCulled = false;
     this.root.add(this.mesh);
     this.anchor = new OverlayAnchor(scene, this.root);
+    this.blackout = new ScreenBlackout(scene);
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -129,12 +131,18 @@ export class SelectionTransition {
     if (this.disposed) throw new Error('選曲トランジションは終了しています。');
     if (this.active) throw new Error('選曲画面を準備しています。');
     this.entry = deferred(); this.finished = deferred();
-    this.phase = 'enter'; this.startedAt = this.now(); this.ready = false;
-    this.showLoading = loading;
+    this.phase = loading ? 'enter' : 'blackout'; this.startedAt = this.now(); this.ready = false;
     this.uniforms.uLoading.value = loading ? 1 : 0;
     this.uniforms.uProgress.value = this.uniforms.uStatusStep.value = 0;
     this.anchor.capture();
-    this.root.visible = true;
+    this.root.visible = loading;
+    if (!loading) {
+      // タイトルへ戻るときはワイプを出さず、完全な暗転中に画面を切り替える。
+      this.blackout.begin(this.startedAt, {
+        onCovered: () => { this.onCovered(); this.entry.resolve(true); },
+        onReveal: this.onReveal,
+      });
+    }
     this.onActive(true);
     this.update(this.startedAt);
     try {
@@ -150,17 +158,24 @@ export class SelectionTransition {
 
   update(now) {
     if (!this.active || this.disposed) return;
+    if (this.phase === 'blackout') {
+      this.blackout.update(now, this.ready && this.canReveal());
+      if (!this.blackout.active) {
+        this.phase = 'idle';
+        this.onActive(false);
+        this.finished.resolve(true);
+      }
+      return;
+    }
     const timing = SELECTION_TRANSITION_TIMING;
     if (this.phase === 'enter') {
       const progress = clamp((now - this.startedAt) / timing.enterMs);
       this.uniforms.uCover.value = outCubic(progress);
       if (progress === 1) {
-        this.phase = this.showLoading ? 'loading' : 'covered'; this.startedAt = now;
+        this.phase = 'loading'; this.startedAt = now;
         this.onCovered();
         this.entry.resolve(true);
       }
-    } else if (this.phase === 'covered') {
-      if (this.ready && this.canReveal()) this.reveal(now);
     } else if (this.phase === 'loading') {
       const progress = clamp((now - this.startedAt) / timing.loadingMs);
       this.uniforms.uProgress.value = Math.min(0.98, progress);
@@ -173,14 +188,6 @@ export class SelectionTransition {
       this.uniforms.uStatusStep.value = Math.min(COMPLETE_TEXT.length, Math.floor(elapsed / timing.letterMs));
       if (elapsed >= COMPLETE_TEXT.length * timing.letterMs + timing.completeMs && this.canReveal()) {
         this.reveal(now);
-      }
-    } else if (this.phase === 'exit') {
-      const progress = clamp((now - this.startedAt) / timing.exitMs);
-      this.uniforms.uCover.value = 1 - outCubic(progress);
-      if (progress === 1) {
-        this.phase = 'idle'; this.root.visible = false;
-        this.onActive(false);
-        this.finished.resolve(true);
       }
     }
     this.anchor.measure(DISTANCE, this);
@@ -195,14 +202,17 @@ export class SelectionTransition {
   }
 
   reveal(now) {
-    this.phase = 'exit'; this.startedAt = now;
-    // 不透明な面で覆っているうちに次のUIを戻し、斜めのワイプで少しずつ見せる。
-    this.onReveal();
+    this.phase = 'blackout';
+    this.blackout.begin(now, {
+      onCovered: () => { this.root.visible = false; },
+      onReveal: this.onReveal,
+    });
   }
 
   cancel() {
     this.entry?.resolve(false); this.finished?.resolve(false);
     const wasActive = this.active;
+    this.blackout.cancel();
     this.phase = 'idle'; this.root.visible = false;
     if (wasActive) this.onActive(false);
   }
@@ -210,6 +220,7 @@ export class SelectionTransition {
     if (this.disposed) return;
     this.disposed = true;
     this.cancel();
+    this.blackout.dispose();
     this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();

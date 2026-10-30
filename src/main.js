@@ -77,6 +77,7 @@ async function bootstrap() {
       }
     },
     onCovered: () => { if (ui) ui.root.visible = false; },
+    onReveal: () => { if (ui) ui.root.visible = true; },
     canReveal: () => !ui || ui.screenPhase === 'stable' && ui.screenKey === ui.screenViewKey(),
   });
   const selectionTransition = new SelectionTransition(scene, {
