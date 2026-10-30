@@ -20,13 +20,34 @@ import { SelectionTransition } from './selection-transition.js';
 import { loadLoadingText } from './loading-text.js';
 import { UISounds, shortcutSound } from './ui-sounds.js';
 
-const storageKey = 'fourflow.settings.v1';
+const storageKey = 'fourflow.settings.v2';
 const settings = { ...DEFAULT_SETTINGS };
 let saved = {};
-try { saved = JSON.parse(localStorage.getItem(storageKey) ?? '{}'); } catch { /* 保存が使えない場合は初期値。 */ }
+let migratedSettings = false;
+try {
+  const current = localStorage.getItem(storageKey);
+  if (current !== null) saved = JSON.parse(current);
+  else {
+    const legacy = localStorage.getItem('fourflow.settings.v1');
+    if (legacy !== null) {
+      saved = JSON.parse(legacy);
+      // 旧配置を標準目線の1.65mからの差に変換する。元の保存データも残す。
+      for (const key of ['height', 'panelLeftY', 'panelRightY', 'panelCenterY']) {
+        if (Number.isFinite(saved?.[key])) {
+          saved[key] -= CONFIG.vrEyeHeight;
+          if (key === 'height') saved[key] += CONFIG.hitPlaneY;
+        }
+      }
+      migratedSettings = true;
+    }
+  }
+} catch { /* 保存が使えない場合は初期値。 */ }
 for (const definition of SETTING_DEFINITIONS) {
   const candidate = saved?.[definition.key];
   if (typeof candidate === 'number' && Number.isFinite(candidate)) settings[definition.key] = clampSetting(definition, candidate);
+}
+if (migratedSettings) {
+  try { localStorage.setItem(storageKey, JSON.stringify(settings)); } catch { /* 保存不可でも変換した値を使う。 */ }
 }
 
 async function bootstrap() {
@@ -141,7 +162,8 @@ async function bootstrap() {
     trackingRig.position.y = headY < CONFIG.minTrackedEyeHeight ? CONFIG.vrEyeHeight - headY : 0;
     trackingRig.updateMatrixWorld(true);
     pendingVRHeight = false;
-    view.recenter();
+    // カメラの描画更新を待たず、今フレームの追跡値で目線の高さを確定する。
+    view.recenter(headY + trackingRig.position.y);
     vr?.reset();
   }
 
@@ -271,7 +293,7 @@ async function bootstrap() {
         pendingVRHeight = true;
         lowHeightSamples = 0;
         updateVRHeight();
-        view.recenter();
+        if (pendingVRHeight) view.recenter();
       } else {
         // KBの見回し角度も正面に戻す。
         const camera = scene.querySelector('#camera');

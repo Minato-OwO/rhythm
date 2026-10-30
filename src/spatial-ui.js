@@ -1008,7 +1008,7 @@ export class SpatialUI {
       PLAY_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 218 + index * 90, true));
       this.text(panel, '音声 ＋：遅く / −：早く　入力 ＋：過去へ補正', 70, 851, 21, MUTED);
     } else if (this.settingsTab === 'lanes') {
-      this.text(panel, '高さ・横幅・位置・傾きを調整（自動保存）', 70, 204, 24, MUTED);
+      this.text(panel, '高さ 0 m：目線 / −：下 / ＋：上（自動保存）', 70, 204, 24, MUTED);
       LANE_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 250 + index * 90, true));
       this.text(panel, '幅 1.00×：標準 / 0.50×：半分 / 1.50×：1.5倍', 70, 710, 22, MUTED);
       this.text(panel, '下地の透明度：0% 不透明 / 100% 透明', 70, 748, 22, MUTED);
@@ -1025,7 +1025,7 @@ export class SpatialUI {
       EFFECT_SETTING_DEFINITIONS.forEach((definition, index) => this.settingRow(panel, definition, 260 + index * 96));
       this.text(panel, '発光は入力に反応 / 波紋と火花はヒット時に表示', 70, 848, 22, MUTED);
     } else {
-      this.text(panel, '位置はレーンを基準に調整します / 変更は自動保存', 70, 194, 24, MUTED);
+      this.text(panel, '目線を基準に配置 / 高さ 0 m：目線と同じ（自動保存）', 70, 194, 24, MUTED);
       const targets = [{ id: 'all', label: '全部まとめて' }, ...PANEL_GROUPS];
       targets.forEach((group, index) => {
         this.button(panel, `target-${group.id}`, group.label, 70 + index * 245, 235, 225, 65, () => { this.panelTarget = group.id; panel.dirty = true; }, { primary: group.id === this.panelTarget });
@@ -1062,7 +1062,7 @@ export class SpatialUI {
       this.button(panel, `${key}-on`, 'ON', 569, controlY, 360, controlHeight, () => setValue(1), { primary: value === 1 });
       return;
     }
-    this.text(panel, `${(key === 'offset' || key === 'audioOffset' || key === 'laneOffsetZ' || key === 'lanePitch') && value > 0 ? '+' : ''}${value.toFixed(digits)}${unit}`, 1030, y, textSize, CYAN, 'right');
+    this.text(panel, `${min < 0 && value > 0 ? '+' : ''}${value.toFixed(digits)}${unit}`, 1030, y, textSize, CYAN, 'right');
     this.button(panel, `${key}-minus`, '−', 70, controlY, 70, controlHeight, () => setValue(getValue() - step));
     this.button(panel, `${key}-plus`, '＋', 960, controlY, 70, controlHeight, () => setValue(getValue() + step));
     const x = 171;
@@ -1086,10 +1086,11 @@ export class SpatialUI {
 
   update(now, songTime = this.game.songTime) {
     this.prepareScreenTransition(now);
-    // レーンの正面配置には追従し、台の高さ変更でUIの高さは動かさない。
+    // 正面合わせで確定した目線を共通の高さ基準にし、台の高さ変更から独立させる。
     const anchor = this.view.root;
-    if (this.anchorDirty || this.root.position.x !== anchor.position.x || this.root.position.z !== anchor.position.z || this.root.rotation.y !== anchor.rotation.y) {
-      this.root.position.set(anchor.position.x, 0, anchor.position.z);
+    const eyeHeight = this.view.eyePosition.y;
+    if (this.anchorDirty || this.root.position.x !== anchor.position.x || this.root.position.y !== eyeHeight || this.root.position.z !== anchor.position.z || this.root.rotation.y !== anchor.rotation.y) {
+      this.root.position.set(anchor.position.x, eyeHeight, anchor.position.z);
       this.root.rotation.y = anchor.rotation.y;
       this.root.updateMatrixWorld(true);
       this.anchorDirty = false;
