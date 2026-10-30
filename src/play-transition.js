@@ -1,5 +1,6 @@
 import { DIFFICULTIES } from './difficulties.js';
 import { OverlayAnchor } from './overlay-viewport.js';
+import { ScreenBlackout } from './screen-blackout.js';
 
 export const PLAY_TRANSITION_TIMING = Object.freeze({ enterMs: 520, minimumHoldMs: 5000, exitMs: 420 });
 const FONT = '"Segoe UI", "Yu Gothic UI", sans-serif';
@@ -14,12 +15,13 @@ const deferred = () => {
 
 // 視点の前に3D面を表示する。VRでは表示位置を固定し、音声再生前に読込を完了する。
 export class PlayTransition {
-  constructor(scene, { loadingImage, onActive = () => {}, onCovered = () => {}, canReveal = () => true, now = () => performance.now() } = {}) {
+  constructor(scene, { loadingImage, onActive = () => {}, onCovered = () => {}, onReveal = () => {}, canReveal = () => true, now = () => performance.now() } = {}) {
     this.scene = scene;
     this.loadingImage = loadingImage;
     this.now = now;
     this.onActive = onActive;
     this.onCovered = onCovered;
+    this.onReveal = onReveal;
     this.canReveal = canReveal;
     this.phase = 'idle';
     this.disposed = false;
@@ -58,6 +60,7 @@ export class PlayTransition {
       return dot;
     });
     this.anchor = new OverlayAnchor(scene, this.root);
+    this.blackout = new ScreenBlackout(scene);
   }
 
   get active() { return this.phase !== 'idle'; }
@@ -173,8 +176,16 @@ export class PlayTransition {
     if (this.disposed || !this.active) return;
     this.entry.resolve(false);
     this.hold.resolve(false);
+    if (!failed) {
+      this.phase = 'blackout';
+      this.blackout.begin(this.now(), {
+        onCovered: () => { this.root.visible = false; },
+        onReveal: this.onReveal,
+      });
+      return;
+    }
     this.exitFrom = this.slide;
-    this.exitTarget = failed ? -1 : 1;
+    this.exitTarget = -1;
     this.startedAt = this.now();
     this.exitStarted = this.coveredAt === null || this.canReveal();
     this.phase = 'exit';
@@ -191,6 +202,14 @@ export class PlayTransition {
 
   update(now) {
     if (!this.active || this.disposed) return;
+    if (this.phase === 'blackout') {
+      this.blackout.update(now, this.canReveal());
+      if (!this.blackout.active) {
+        this.phase = 'idle';
+        this.onActive(false);
+      }
+      return;
+    }
     const timing = PLAY_TRANSITION_TIMING;
     if (this.phase === 'enter') {
       const p = Math.max(0, Math.min(1, (now - this.startedAt) / timing.enterMs));
@@ -231,6 +250,7 @@ export class PlayTransition {
     if (this.active) this.onActive(false);
     this.phase = 'idle';
     this.root.visible = false;
+    this.blackout.dispose();
     this.anchor.dispose();
     this.root.removeFromParent();
     for (const resource of this.resources) resource.dispose();

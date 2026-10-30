@@ -6,6 +6,8 @@ export const JUDGEMENTS = Object.freeze({
   miss: { label: 'MISS', color: '#ff8c9d' },
 });
 
+const HIT_PAD = Object.freeze({ centerY: 0.01, height: 0.025, depth: 0.25 });
+
 export const CONFIG = Object.freeze({
   keys: ['KeyD', 'KeyF', 'KeyJ', 'KeyK'],
   colors: ['#43ddff', '#5c96ff', '#ef8bc6', '#ff9478'],
@@ -14,8 +16,9 @@ export const CONFIG = Object.freeze({
   laneSurfaceY: -0.018,
   laneSurfaceHeight: 0.014,
   hitZ: -0.65,
-  hitPadDepth: 0.25,
-  hitPlaneY: 0.07,
+  hitPad: HIT_PAD,
+  hitPlaneY: HIT_PAD.centerY + HIT_PAD.height / 2,
+  noteY: 0.07,
   // 距離と表示時間を同じ倍率で延ばし、流れる速さを保って奥から見せる。
   laneDepth: 15,
   travelSeconds: 4.8,
@@ -27,7 +30,7 @@ export const CONFIG = Object.freeze({
   baseScore: 1_000_000,
   clearScore: 600_000,
   highClearScore: 900_000,
-  hold: { endToleranceSeconds: 0.1, trackingGraceSeconds: 0.12, resumeGraceSeconds: 0.4, abovePlane: 0.16, belowPlane: 0.30 },
+  hold: { endToleranceSeconds: 0.1, trackingGraceSeconds: 0.12, resumeGraceSeconds: 0.4 },
   windows: { perfectPlus: 0.020, perfect: 0.045, great: 0.09, good: 0.15 },
   weights: { perfectPlus: 1, perfect: 1, great: 0.7, good: 0.4, miss: 0 },
   swing: {

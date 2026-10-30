@@ -133,10 +133,10 @@ export class VRInput {
       this.tip.z += p.z;
       this.tip.applyMatrix4(this.trackingToLane);
       const contactLane = laneAt(this.tip.x);
-      // 見えている判定パッドの前後の端を、そのまま入力範囲に使う。
-      const touching = Math.abs(this.tip.z - CONFIG.hitZ) <= CONFIG.hitPadDepth / 2
-        && this.tip.y >= CONFIG.hitPlaneY - CONFIG.hold.belowPlane
-        && this.tip.y <= CONFIG.hitPlaneY + CONFIG.hold.abovePlane;
+      // 前後・上下とも見えている判定パッドの内側だけを接触範囲にする。
+      const touching = Math.abs(this.tip.z - CONFIG.hitZ) <= CONFIG.hitPad.depth / 2
+        && this.tip.y >= CONFIG.hitPad.centerY - CONFIG.hitPad.height / 2
+        && this.tip.y <= CONFIG.hitPlaneY;
       for (let lane = 0; lane < 4; lane++) this.game.setHeld(lane, touching && lane === contactLane, source.handedness, songTime);
       const dt = now - hand.sampleTime;
       if (!hand.valid || dt <= 0 || dt > CONFIG.swing.maxSampleGapSeconds || hand.previous.distanceTo(this.tip) > CONFIG.swing.maxSampleDistance) {
@@ -157,7 +157,7 @@ export class VRInput {
           const x = hand.previous.x + (this.tip.x - hand.previous.x) * alpha;
           const z = hand.previous.z + (this.tip.z - hand.previous.z) * alpha;
           const lane = laneAt(x);
-          if (lane !== -1 && Math.abs(z - CONFIG.hitZ) <= CONFIG.hitPadDepth / 2) {
+          if (lane !== -1 && Math.abs(z - CONFIG.hitZ) <= CONFIG.hitPad.depth / 2) {
             hand.lastSwing = now;
             const hitTime = hand.songTime + (songTime - hand.songTime) * alpha;
             if (!this.game.autoplay) this.view.flash(lane);

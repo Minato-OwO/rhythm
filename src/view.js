@@ -79,7 +79,7 @@ export class StageView {
       const x = laneX(lane);
       this.box(CONFIG.laneWidth, CONFIG.laneSurfaceHeight, CONFIG.laneDepth + 0.2, '#101d30', x, CONFIG.laneSurfaceY, centerZ, 0.92);
       const edge = this.box(0.008, 0.007, CONFIG.laneDepth, CONFIG.colors[lane], x - CONFIG.laneSpacing / 2, 0, centerZ, 0.2);
-      const pad = this.box(CONFIG.laneWidth, 0.025, CONFIG.hitPadDepth, CONFIG.colors[lane], x, 0.01, CONFIG.hitZ, 0.28);
+      const pad = this.box(CONFIG.laneWidth, CONFIG.hitPad.height, CONFIG.hitPad.depth, CONFIG.colors[lane], x, CONFIG.hitPad.centerY, CONFIG.hitZ, 0.28);
       this.pads.push(pad);
       const line = this.box(CONFIG.laneWidth, 0.01, 0.018, CONFIG.colors[lane], x, 0.031, CONFIG.hitZ);
       this.laneAccents[lane].push(edge, pad, line);
@@ -168,7 +168,7 @@ export class StageView {
     // 描画とVR入力が共有する座標系を縮め、見た目と判定範囲を揃える。
     this.laneRoot.scale.x = this.settings.laneWidthScale ?? 1;
     this.laneRoot.rotation.x = pitch;
-    // ノーツ中心の判定ラインを回転軸にし、傾きを変えても判定高さを保つ。
+    // 判定パッドの上面を回転軸にし、傾きを変えても接触面の高さを保つ。
     this.laneRoot.position.set(
       0,
       CONFIG.hitPlaneY - (CONFIG.hitPlaneY * cosine - CONFIG.hitZ * sine),
@@ -301,13 +301,13 @@ export class StageView {
     const rate = this.scrollRate * this.speedMultiplier * (note.scrollMultiplier ?? 1);
     const headDistance = note.started ? 0 : (entry.position - this.scrollPosition) * rate;
     mesh.head.visible = headDistance >= -0.6 && headDistance <= CONFIG.laneDepth;
-    mesh.head.position.set(0, CONFIG.hitPlaneY, CONFIG.hitZ - headDistance);
+    mesh.head.position.set(0, CONFIG.noteY, CONFIG.hitZ - headDistance);
     const hold = note.endTime !== null && note.endTime !== undefined;
     mesh.tail.visible = mesh.body.visible = hold;
     if (!hold) return;
     const tailDistance = (entry.tail - this.scrollPosition) * rate;
     mesh.tail.visible = tailDistance >= -0.6 && tailDistance <= CONFIG.laneDepth;
-    mesh.tail.position.set(0, CONFIG.hitPlaneY, CONFIG.hitZ - tailDistance);
+    mesh.tail.position.set(0, CONFIG.noteY, CONFIG.hitZ - tailDistance);
     const bounds = note.started ? this.scrollTrack.bounds(Math.min(this.displayTime, note.endTime), note.endTime, this.scrollBounds) : entry;
     const a = (bounds.min - this.scrollPosition) * rate;
     const b = (bounds.max - this.scrollPosition) * rate;
@@ -315,7 +315,7 @@ export class StageView {
     const far = Math.min(CONFIG.laneDepth, Math.max(a, b));
     mesh.body.visible = far > near;
     mesh.body.material = this.noteSkins?.holdMaterial(note.lane, note.started) ?? (note.started ? this.activeHoldMaterials[note.lane] : this.holdMaterials[note.lane]);
-    mesh.body.position.set(0, CONFIG.hitPlaneY - 0.012, CONFIG.hitZ - (near + far) / 2);
+    mesh.body.position.set(0, CONFIG.noteY - 0.012, CONFIG.hitZ - (near + far) / 2);
     mesh.body.scale.set(CONFIG.laneWidth - 0.025, 0.03, Math.max(0.001, far - near));
   }
 
